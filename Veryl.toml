@@ -1,0 +1,8 @@
+[project]
+name = "hades_v0"
+version = "0.1.0"
+
+[build]
+sources = ["src-veryl"]
+target  = {type = "directory", path = "src"}
+omit_project_prefix = true

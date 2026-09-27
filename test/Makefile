@@ -1,45 +1,46 @@
 # Makefile
 # See https://docs.cocotb.org/en/stable/quickstart.html for more info
 
-# defaults
 SIM ?= icarus
-FST ?= -fst # Use more efficient FST format
+FST ?= -fst
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.v
+
+COMPILE_ARGS += -g2012
 
 ifneq ($(GATES),yes)
 
-# RTL simulation:
-SIM_BUILD				= sim_build/rtl
-VERILOG_SOURCES += $(addprefix $(SRC_DIR)/,$(PROJECT_SOURCES))
+SIM_BUILD = sim_build/rtl
+FIXED_CORE_SV = $(SIM_BUILD)/hades_v0_core_fixed.sv
+$(FIXED_CORE_SV): $(SRC_DIR)/hades_v0_core.sv | $(SIM_BUILD)
+	sed 's/input  var logic/input  logic/g' $< > $@
+
+$(SIM_BUILD):
+	mkdir -p $@
+
+VERILOG_SOURCES += $(SRC_DIR)/tt_um_hades_v0.v
+VERILOG_SOURCES += $(FIXED_CORE_SV)
+VERILOG_SOURCES += $(PWD)/sky130_sram_1rw_tiny.v
 
 else
 
-# Gate level simulation:
-SIM_BUILD				= sim_build/gl
-COMPILE_ARGS    += -DGL_TEST
-COMPILE_ARGS    += -DFUNCTIONAL
-COMPILE_ARGS    += -DUSE_POWER_PINS
-COMPILE_ARGS    += -DSIM
-COMPILE_ARGS    += -DUNIT_DELAY=\#1
-VERILOG_SOURCES += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/primitives.v
-VERILOG_SOURCES += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/sky130_fd_sc_hd.v
-
-# this gets copied in by the GDS action workflow
-VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
+SIM_BUILD                = sim_build/gl
+COMPILE_ARGS            += -DGL_TEST
+COMPILE_ARGS            += -DFUNCTIONAL
+COMPILE_ARGS            += -DUSE_POWER_PINS
+COMPILE_ARGS            += -DSIM
+COMPILE_ARGS            += -DUNIT_DELAY=\#1
+VERILOG_SOURCES         += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/primitives.v
+VERILOG_SOURCES         += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/sky130_fd_sc_hd.v
+VERILOG_SOURCES         += $(PWD)/gate_level_netlist.v
+VERILOG_SOURCES         += $(PWD)/sky130_sram_1rw_tiny.v
 
 endif
 
-# Allow sharing configuration between design and testbench via `include`:
-COMPILE_ARGS 		+= -I$(SRC_DIR)
-
-# Include the testbench sources:
+COMPILE_ARGS    += -I$(SRC_DIR)
 VERILOG_SOURCES += $(PWD)/tb.v
-TOPLEVEL = tb
+TOPLEVEL         = tb
 
-# List test modules to run, separated by commas and without the .py suffix:
 COCOTB_TEST_MODULES = test
 
-# include cocotb's make rules to take care of the simulator setup
 include $(shell cocotb-config --makefiles)/Makefile.sim
