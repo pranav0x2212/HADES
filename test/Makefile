@@ -6,20 +6,24 @@ FST ?= -fst
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
 
-PROJECT_SOURCES = tt_um_hades_v0.v hades_v0_core.sv
-
 COMPILE_ARGS += -g2012
 
 ifneq ($(GATES),yes)
 
-# RTL simulation:
-SIM_BUILD                = sim_build/rtl
-VERILOG_SOURCES         += $(addprefix $(SRC_DIR)/,$(PROJECT_SOURCES))
-VERILOG_SOURCES         += $(PWD)/sky130_sram_1rw_tiny.v
+SIM_BUILD = sim_build/rtl
+FIXED_CORE_SV = $(SIM_BUILD)/hades_v0_core_fixed.sv
+$(FIXED_CORE_SV): $(SRC_DIR)/hades_v0_core.sv | $(SIM_BUILD)
+	sed 's/input  var logic/input  logic/g' $< > $@
+
+$(SIM_BUILD):
+	mkdir -p $@
+
+VERILOG_SOURCES += $(SRC_DIR)/tt_um_hades_v0.v
+VERILOG_SOURCES += $(FIXED_CORE_SV)
+VERILOG_SOURCES += $(PWD)/sky130_sram_1rw_tiny.v
 
 else
 
-# Gate level simulation:
 SIM_BUILD                = sim_build/gl
 COMPILE_ARGS            += -DGL_TEST
 COMPILE_ARGS            += -DFUNCTIONAL

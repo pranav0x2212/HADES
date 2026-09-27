@@ -221,3 +221,4 @@ module hades_v0_core (
     always_comb uio_out = {any_hit & done, done, busy, 5'b0};
     always_comb uio_oe  = 8'b11100000;
 endmodule
+//# sourceMappingURL=hades_v0_core.sv.map
