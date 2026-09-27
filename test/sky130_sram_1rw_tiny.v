@@ -2,7 +2,6 @@
 // Words: 16
 // Word size: 32
 // Write size: 8
-/// sta-blackbox
 
 `ifndef SRAM_GUARD
 `define SRAM_GUARD
@@ -20,7 +19,6 @@ module sky130_sram_1rw_tiny(
   parameter DATA_WIDTH = 32 ;
   parameter ADDR_WIDTH = 4 ;
   parameter RAM_DEPTH = 1 << ADDR_WIDTH;
-  // FIXME: This delay is arbitrary.
   parameter DELAY = 3 ;
   parameter VERBOSE = 1 ; //Set to 0 to only display warnings
   parameter T_HOLD = 1 ; //Delay to hold dout value after posedge. Value is arbitrary

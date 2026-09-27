@@ -2,7 +2,7 @@
 project:
   title:        "HADES v0: SRAM-backed Hamming nearest-neighbour search"
   author:       "Pranav M"
-  discord:      ""
+  discord:      "prawns_1205"
   description:  "16-entry x 32-bit SRAM-backed masked Hamming distance search engine. Finds nearest neighbour and threshold-match bitmap over 16 entries."
   language:     "Verilog"
   clock_hz:     50000000

@@ -1,22 +1,3 @@
-# Copy of LibreLane 3.0.14 scripts/openroad/common/pdn_cfg.tcl with one change (see HADES DEVIATION).
-# Copyright 2025 LibreLane Contributors
-#
-# Adapted from OpenLane
-#
-# Copyright 2020-2022 Efabless Corporation
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 source $::env(SCRIPTS_DIR)/openroad/common/io.tcl
 source $::env(SCRIPTS_DIR)/openroad/common/set_global_connections.tcl
 set_global_connections
@@ -119,10 +100,6 @@ if { $::env(PDN_MULTILAYER) == 1 } {
         {*}$arg_list
 }
 
-# HADES DEVIATION #2 (mirrors tt25a_openram_testchip): the macro blocks met4 except in two free columns
-# (abs x ~44-57 um and ~227-265 um) and in the macro-free right strip (x>~311 um). Stock 38.87 um straps mostly
-# land on blocked met4 and are trimmed, leaving VGND without a path (PSM-0069). Config uses pitch 200 / offset 43
-# / spacing 4.5 so pairs land in the free columns, plus this extra full-height pair in the right strip.
 add_pdn_stripe \
     -grid stdcell_grid \
     -layer $::env(PDN_VERTICAL_LAYER) \
@@ -132,7 +109,6 @@ add_pdn_stripe \
     -spacing 4.5 \
     -starts_with POWER
 
-# Adds the standard cell rails if enabled.
 if { $::env(PDN_ENABLE_RAILS) == 1 } {
     add_pdn_stripe \
         -grid stdcell_grid \
@@ -145,8 +121,6 @@ if { $::env(PDN_ENABLE_RAILS) == 1 } {
         -layers "$::env(PDN_RAIL_LAYER) $::env(PDN_VERTICAL_LAYER)"
 }
 
-
-# Adds the core ring if enabled.
 if { $::env(PDN_CORE_RING) == 1 } {
     if { $::env(PDN_MULTILAYER) == 1 } {
         set arg_list [list]
@@ -203,8 +177,6 @@ define_pdn_grid \
     -starts_with POWER \
     -halo "$::env(PDN_HORIZONTAL_HALO) $::env(PDN_VERTICAL_HALO)"
 
-# HADES DEVIATION #1: tiny OpenRAM macro power pins are vccd1 on met3 and vssd1 on met4; the stock
-# macro grid connects only met4<->met5 (unused with PDN_MULTILAYER=0), so nothing reached the macro.
 add_pdn_connect \
     -grid macro \
     -layers "met3 met4"
