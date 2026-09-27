@@ -11,3 +11,21 @@ test/sim_build
 test/__pycache__/
 test/results.xml
 test/gate_level_netlist.v
+
+# Veryl build artifacts
+src/*.sv.map
+hades_v0.f
+.build/
+dependencies/
+
+# Veryl v0 experiments — generated build artifacts
+experiments/veryl_v0/target/
+experiments/veryl_v0/dependencies/
+experiments/veryl_v0/.build/
+experiments/veryl_v0/hades_v0.f
+experiments/veryl_v0/synth/synth.log
+experiments/veryl_v0/abc.history
+
+# Yosys / EDA scratchpad artifacts
+abc.history
+docs/architecture_exploration.md

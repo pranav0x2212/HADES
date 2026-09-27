@@ -1,0 +1,208 @@
+module hades_v0_core (
+    clk      : input  'p clock          ,
+    clk_n    : input  'p clock_negedge  ,
+    rst_n    : input  'p reset_async_low ,
+    ui_in    : input  'p logic<8>        ,
+    uio_in   : input  'p logic<8>        ,
+    uo_out   : output 'p logic<8>        ,
+    uio_out  : output 'p logic<8>        ,
+    uio_oe   : output 'p logic<8>        ,
+    sram_addr: output 'p logic<4>        ,
+    sram_csb : output 'p logic           ,
+    sram_web : output 'p logic           ,
+    sram_din : output 'p logic<32>       ,
+    sram_dout: input  'p logic<32>       ,
+) {
+    var r1: 'p logic;
+    var r2: 'p logic;
+    always_ff (clk, rst_n) {
+        if_reset {
+            r1 = 0;
+            r2 = 0;
+        } else {
+            r1 = 1;
+            r2 = r1;
+        }
+    }
+    var rst: 'p logic;
+    assign rst = ~r2;
+
+    var s1: 'p logic;
+    var s2: 'p logic;
+    var s3: 'p logic;
+    always_ff (clk) {
+        s1 = uio_in[0];
+        s2 = s1;
+        s3 = s2;
+    }
+    var pulse: 'p logic;
+    var op   : 'p logic<3>;
+    assign pulse = s2 & ~s3;
+    assign op    = uio_in[3:1];
+
+    var busy  : 'p logic;
+    var done  : 'p logic;
+    var wr_req: 'p logic;
+    var cnt   : 'p logic<5>;
+    var rsel  : 'p logic<2>;
+
+    var op_v    : 'p logic;
+    var do_shq  : 'p logic;
+    var do_shm  : 'p logic;
+    var do_thr  : 'p logic;
+    var do_wr   : 'p logic;
+    var do_run  : 'p logic;
+    var do_rdout: 'p logic;
+
+    assign op_v     = pulse & ~busy;
+    assign do_shq   = op_v & (op == 3'd0);
+    assign do_shm   = op_v & (op == 3'd1);
+    assign do_thr   = op_v & (op == 3'd2);
+    assign do_wr    = op_v & (op == 3'd3);
+    assign do_run   = op_v & (op == 3'd4);
+    assign do_rdout = op_v & (op == 3'd5);
+
+    var q  : 'p logic<32>;
+    var m  : 'p logic<32>;
+    var thr: 'p logic<6>;
+    always_ff (clk) {
+        if do_shq { q   = {q[23:0], ui_in}; }
+        if do_shm { m   = {m[23:0], ui_in}; }
+        if do_thr { thr = ui_in[5:0]; }
+    }
+    assign sram_din = q;
+
+    always_ff (clk, rst_n) {
+        if_reset {
+            busy   = 0;
+            done   = 0;
+            wr_req = 0;
+            cnt    = 0;
+            rsel   = 0;
+        } else {
+            wr_req = do_wr;
+            if wr_req { cnt = {1'b0, cnt[3:0] + 4'd1}; }
+            if do_run {
+                busy = 1;
+                done = 0;
+                cnt  = 0;
+                rsel = 0;
+            } else if busy {
+                if cnt == 5'd17 {
+                    busy = 0;
+                    done = 1;
+                    cnt  = 0;
+                } else {
+                    cnt = cnt + 5'd1;
+                }
+            }
+            if do_rdout { rsel = rsel + 2'd1; }
+        }
+    }
+
+    var n_addr: 'p logic<4>;
+    var n_csb : 'p logic;
+    var n_web : 'p logic;
+    always_ff (clk_n) {
+        n_addr = cnt[3:0];
+        if rst {
+            n_csb = 1;
+            n_web = 1;
+        } else {
+            n_csb = ~(wr_req | (busy & ~cnt[4]));
+            n_web = ~wr_req;
+        }
+    }
+    assign sram_addr = n_addr;
+    assign sram_csb  = n_csb;
+    assign sram_web  = n_web;
+
+    var dreg: 'p logic<32>;
+    always_ff (clk) {
+        dreg = sram_dout;
+    }
+
+    var x: 'p logic<32>;
+    assign x = (dreg ^ q) & m;
+
+    var l1: 'p logic<2>[16];
+    var l2: 'p logic<3>[8];
+    var l3: 'p logic<4>[4];
+    var l4: 'p logic<5>[2];
+    var d : 'p logic<6>;
+
+    assign l1[0]  = {1'b0, x[1]}   + {1'b0, x[0]};
+    assign l1[1]  = {1'b0, x[3]}   + {1'b0, x[2]};
+    assign l1[2]  = {1'b0, x[5]}   + {1'b0, x[4]};
+    assign l1[3]  = {1'b0, x[7]}   + {1'b0, x[6]};
+    assign l1[4]  = {1'b0, x[9]}   + {1'b0, x[8]};
+    assign l1[5]  = {1'b0, x[11]}  + {1'b0, x[10]};
+    assign l1[6]  = {1'b0, x[13]}  + {1'b0, x[12]};
+    assign l1[7]  = {1'b0, x[15]}  + {1'b0, x[14]};
+    assign l1[8]  = {1'b0, x[17]}  + {1'b0, x[16]};
+    assign l1[9]  = {1'b0, x[19]}  + {1'b0, x[18]};
+    assign l1[10] = {1'b0, x[21]}  + {1'b0, x[20]};
+    assign l1[11] = {1'b0, x[23]}  + {1'b0, x[22]};
+    assign l1[12] = {1'b0, x[25]}  + {1'b0, x[24]};
+    assign l1[13] = {1'b0, x[27]}  + {1'b0, x[26]};
+    assign l1[14] = {1'b0, x[29]}  + {1'b0, x[28]};
+    assign l1[15] = {1'b0, x[31]}  + {1'b0, x[30]};
+
+    assign l2[0]  = {1'b0, l1[1]}  + {1'b0, l1[0]};
+    assign l2[1]  = {1'b0, l1[3]}  + {1'b0, l1[2]};
+    assign l2[2]  = {1'b0, l1[5]}  + {1'b0, l1[4]};
+    assign l2[3]  = {1'b0, l1[7]}  + {1'b0, l1[6]};
+    assign l2[4]  = {1'b0, l1[9]}  + {1'b0, l1[8]};
+    assign l2[5]  = {1'b0, l1[11]} + {1'b0, l1[10]};
+    assign l2[6]  = {1'b0, l1[13]} + {1'b0, l1[12]};
+    assign l2[7]  = {1'b0, l1[15]} + {1'b0, l1[14]};
+
+    assign l3[0]  = {1'b0, l2[1]}  + {1'b0, l2[0]};
+    assign l3[1]  = {1'b0, l2[3]}  + {1'b0, l2[2]};
+    assign l3[2]  = {1'b0, l2[5]}  + {1'b0, l2[4]};
+    assign l3[3]  = {1'b0, l2[7]}  + {1'b0, l2[6]};
+
+    assign l4[0]  = {1'b0, l3[1]}  + {1'b0, l3[0]};
+    assign l4[1]  = {1'b0, l3[3]}  + {1'b0, l3[2]};
+
+    assign d      = {1'b0, l4[1]}  + {1'b0, l4[0]};
+
+    var best_dist: 'p logic<6>;
+    var best_idx : 'p logic<4>;
+    var hits     : 'p logic<16>;
+    var any_hit  : 'p logic;
+
+    var cmp_v: 'p logic;
+    var idx  : 'p logic<4>;
+    var lt   : 'p logic;
+    var hit  : 'p logic;
+
+    assign cmp_v = busy & (cnt[4] | cnt[3] | cnt[2] | cnt[1]);
+    assign idx   = cnt[3:0] - 4'd2;
+    assign lt    = ~(d >= best_dist);
+    assign hit   = d <= thr;
+
+    always_ff (clk) {
+        if do_run {
+            best_dist = 6'd63;
+            any_hit   = 0;
+        } else if cmp_v {
+            if lt { best_dist = d; best_idx = idx; }
+            hits = {hit, hits[15:1]};
+            if hit { any_hit = 1; }
+        }
+    }
+
+    var res: 'p logic<8>;
+    always_comb {
+        case rsel {
+            2'd0:    res = {4'b0, best_idx};
+            2'd1:    res = {2'b0, best_dist};
+            2'd2:    res = hits[7:0];
+            default: res = hits[15:8];
+        }
+    }
+    assign uo_out  = res;
+    assign uio_out = {any_hit & done, done, busy, 5'b0};
+    assign uio_oe  = 8'b11100000;
+}
