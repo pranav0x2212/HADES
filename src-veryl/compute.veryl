@@ -1,0 +1,97 @@
+// Popcount tree is generated and timing-critical: do not hand-edit or re-associate.
+// Synthesis boundary: SYNTH_KEEP_HIERARCHY_MODULES in src/config.json.
+module compute (
+    row_data  : input  'p logic<32>,
+    q         : input  'p logic<32>,
+    mask      : input  'p logic<32>,
+    use_xor   : input  'p logic<4> ,
+    d         : output 'p logic<6> ,
+    exact_hit : output 'p logic    ,
+    masked_row: output 'p logic<32>,
+) {
+    var x: 'p logic<32>;
+    always_comb {
+        for k in 0..4 {
+            if use_xor[k] { x[8*k+:8] = (row_data[8*k+:8] ^ q[8*k+:8]) & mask[8*k+:8]; }
+            else          { x[8*k+:8] = row_data[8*k+:8] & mask[8*k+:8]; }
+        }
+    }
+    assign masked_row = x;
+    assign exact_hit  = ~|x;
+
+    let s1: 'p logic = x[0] ^ x[1] ^ x[2];
+    let c1: 'p logic = (x[0] & x[1]) | (x[0] & x[2]) | (x[1] & x[2]);
+    let s2: 'p logic = x[3] ^ x[4] ^ x[5];
+    let c2: 'p logic = (x[3] & x[4]) | (x[3] & x[5]) | (x[4] & x[5]);
+    let s3: 'p logic = x[6] ^ x[7] ^ x[8];
+    let c3: 'p logic = (x[6] & x[7]) | (x[6] & x[8]) | (x[7] & x[8]);
+    let s4: 'p logic = x[9] ^ x[10] ^ x[11];
+    let c4: 'p logic = (x[9] & x[10]) | (x[9] & x[11]) | (x[10] & x[11]);
+    let s5: 'p logic = x[12] ^ x[13] ^ x[14];
+    let c5: 'p logic = (x[12] & x[13]) | (x[12] & x[14]) | (x[13] & x[14]);
+    let s6: 'p logic = x[15] ^ x[16] ^ x[17];
+    let c6: 'p logic = (x[15] & x[16]) | (x[15] & x[17]) | (x[16] & x[17]);
+    let s7: 'p logic = x[18] ^ x[19] ^ x[20];
+    let c7: 'p logic = (x[18] & x[19]) | (x[18] & x[20]) | (x[19] & x[20]);
+    let s8: 'p logic = x[21] ^ x[22] ^ x[23];
+    let c8: 'p logic = (x[21] & x[22]) | (x[21] & x[23]) | (x[22] & x[23]);
+    let s9: 'p logic = x[24] ^ x[25] ^ x[26];
+    let c9: 'p logic = (x[24] & x[25]) | (x[24] & x[26]) | (x[25] & x[26]);
+    let s10: 'p logic = x[27] ^ x[28] ^ x[29];
+    let c10: 'p logic = (x[27] & x[28]) | (x[27] & x[29]) | (x[28] & x[29]);
+    let s11: 'p logic = x[30] ^ x[31];
+    let c11: 'p logic = x[30] & x[31];
+    let s12: 'p logic = s1 ^ s2 ^ s3;
+    let c12: 'p logic = (s1 & s2) | (s1 & s3) | (s2 & s3);
+    let s13: 'p logic = s4 ^ s5 ^ s6;
+    let c13: 'p logic = (s4 & s5) | (s4 & s6) | (s5 & s6);
+    let s14: 'p logic = s7 ^ s8 ^ s9;
+    let c14: 'p logic = (s7 & s8) | (s7 & s9) | (s8 & s9);
+    let s15: 'p logic = s10 ^ s11;
+    let c15: 'p logic = s10 & s11;
+    let s16: 'p logic = c1 ^ c2 ^ c3;
+    let c16: 'p logic = (c1 & c2) | (c1 & c3) | (c2 & c3);
+    let s17: 'p logic = c4 ^ c5 ^ c6;
+    let c17: 'p logic = (c4 & c5) | (c4 & c6) | (c5 & c6);
+    let s18: 'p logic = c7 ^ c8 ^ c9;
+    let c18: 'p logic = (c7 & c8) | (c7 & c9) | (c8 & c9);
+    let s19: 'p logic = c10 ^ c11;
+    let c19: 'p logic = c10 & c11;
+    let s20: 'p logic = s12 ^ s13 ^ s14;
+    let c20: 'p logic = (s12 & s13) | (s12 & s14) | (s13 & s14);
+    let s21: 'p logic = c12 ^ c13 ^ c14;
+    let c21: 'p logic = (c12 & c13) | (c12 & c14) | (c13 & c14);
+    let s22: 'p logic = c15 ^ s16 ^ s17;
+    let c22: 'p logic = (c15 & s16) | (c15 & s17) | (s16 & s17);
+    let s23: 'p logic = s18 ^ s19;
+    let c23: 'p logic = s18 & s19;
+    let s24: 'p logic = c16 ^ c17 ^ c18;
+    let c24: 'p logic = (c16 & c17) | (c16 & c18) | (c17 & c18);
+    let s25: 'p logic = s20 ^ s15;
+    let c25: 'p logic = s20 & s15;
+    let s26: 'p logic = c20 ^ s21 ^ s22;
+    let c26: 'p logic = (c20 & s21) | (c20 & s22) | (s21 & s22);
+    let s27: 'p logic = c21 ^ c22 ^ c23;
+    let c27: 'p logic = (c21 & c22) | (c21 & c23) | (c22 & c23);
+    let s28: 'p logic = s24 ^ c19;
+    let c28: 'p logic = s24 & c19;
+    let s29: 'p logic = c25 ^ s26 ^ s23;
+    let c29: 'p logic = (c25 & s26) | (c25 & s23) | (s26 & s23);
+    let s30: 'p logic = c26 ^ s27 ^ s28;
+    let c30: 'p logic = (c26 & s27) | (c26 & s28) | (s27 & s28);
+    let s31: 'p logic = c27 ^ c28 ^ c24;
+    let c31: 'p logic = (c27 & c28) | (c27 & c24) | (c28 & c24);
+    let s32: 'p logic = c29 ^ s30;
+    let c32: 'p logic = c29 & s30;
+    let s33: 'p logic = c30 ^ s31;
+    let c33: 'p logic = c30 & s31;
+    let s34: 'p logic = c32 ^ s33;
+    let c34: 'p logic = c32 & s33;
+    let s35: 'p logic = c33 ^ c31;
+    let c35: 'p logic = c33 & c31;
+    let s36: 'p logic = c34 ^ s35;
+    let c36: 'p logic = c34 & s35;
+    let s37: 'p logic = c36 ^ c35;
+    let c37: 'p logic = c36 & c35;
+    assign d = {s37, s36, s34, s32, s29, s25};
+}

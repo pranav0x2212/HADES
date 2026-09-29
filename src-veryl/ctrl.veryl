@@ -1,0 +1,244 @@
+// fsm: 0=FETCH 1=SCAN 2=WAIT 3=HALT
+module ctrl (
+    clk      : input  'p clock          ,
+    clk_n    : input  'p clock_negedge  ,
+    rst_n    : input  'p reset_async_low,
+
+    instr    : input  'p logic<16>      ,
+    pc       : output 'p logic<5>       ,
+    pc_next  : output 'p logic<5>       ,
+    sta_en   : output 'p logic          ,
+
+    rst_init : output 'p logic          ,
+    upd_en   : output 'p logic          ,
+    scan_row : output 'p logic<4>       ,
+
+    sram_addr: output 'p logic<4>       ,
+    sram_csb : output 'p logic          ,
+    sram_web : output 'p logic          ,
+    sram_din : output 'p logic<32>      ,
+    dreg     : output 'p logic<32>      ,
+
+    sram_dout: input  'p logic<32>      ,
+
+    q_wr_en  : output 'p logic          ,
+    q_wr_dat : output 'p logic<32>      ,
+    a_wr_en  : output 'p logic          ,
+    a_wr_dat : output 'p logic<32>      ,
+    m_wr_en  : output 'p logic          ,
+    m_wr_dat : output 'p logic<32>      ,
+
+    scan_op  : output 'p logic<3>       ,
+    use_xor_o: output 'p logic<4>       ,
+    emit_src : output 'p logic<4>       ,
+    emit_en  : output 'p logic          ,
+
+    strobe   : input  'p logic          ,
+    wb_en    : output 'p logic          ,
+    wb_dst   : output 'p logic<2>       , // WAITBYTE destination: 0=Q 1=A 2=MASK
+    wb_pos   : output 'p logic<2>       , // WAITBYTE byte lane: 0=B0 1=B1 2=B2 3=B3
+
+    br_threshold_hit: input  'p logic  ,
+    br_min_valid    : input  'p logic  ,
+    br_count_nz     : input  'p logic  ,
+    br_match_nz     : input  'p logic  ,
+    br_a_zero       : input  'p logic  ,
+
+    busy     : output 'p logic          ,
+    halted   : output 'p logic          ,
+) {
+    var fsm       : 'p logic<3>;
+    var pc_r      : 'p logic<5>;
+    var scan_row_r: 'p logic<4>;
+    var scan_end_r: 'p logic<4>;
+    var dreg_r    : 'p logic<32>;
+
+    var opc: 'p logic<4>;
+    var fA : 'p logic<4>;
+    var fB : 'p logic<4>;
+    var fC : 'p logic<4>;
+    assign opc = instr[15:12];
+    assign fA  = instr[11:8];
+    assign fB  = instr[7:4];
+    assign fC  = instr[3:0];
+
+    var in_fetch: 'p logic;
+    var in_scan : 'p logic;
+    var in_wait : 'p logic;
+    var in_halt : 'p logic;
+    assign in_fetch = ~(fsm[2] | fsm[1] | fsm[0]);
+    assign in_scan  = ~(fsm[2] | fsm[1]) & fsm[0];
+    assign in_wait  =  ~fsm[2] & fsm[1] & ~fsm[0];
+    assign in_halt  =  ~fsm[2] & fsm[1] &  fsm[0];
+
+    var is_scan    : 'p logic;
+    var is_ldq     : 'p logic;
+    var is_lda     : 'p logic;
+    var is_ldm     : 'p logic;
+    var is_sta     : 'p logic;
+    var is_emit    : 'p logic;
+    var is_waitbyte: 'p logic;
+    var is_branch  : 'p logic;
+    var is_halt    : 'p logic;
+    var is_clrmsk  : 'p logic;
+    assign is_scan     = in_fetch & (opc == 4'd4);
+    assign is_ldq      = in_fetch & (opc == 4'd0);
+    assign is_lda      = in_fetch & (opc == 4'd1);
+    assign is_ldm      = in_fetch & (opc == 4'd2);
+    assign is_sta      = in_fetch & (opc == 4'd3);
+    assign is_emit     = in_fetch & (opc == 4'd6);
+    assign is_waitbyte = in_fetch & (opc == 4'd5);
+    assign is_branch   = in_fetch & (opc == 4'd7);
+    assign is_halt     = in_fetch & (opc == 4'd8);
+    assign is_clrmsk   = in_fetch & (opc == 4'd9);
+
+    var scan_end_raw  : 'p logic<5>;
+    var scan_end_clamp: 'p logic<4>;
+    assign scan_end_raw = {1'b0, fA} + {1'b0, fB};
+    always_comb {
+        if scan_end_raw[4] { scan_end_clamp = 4'd15; }
+        else               { scan_end_clamp = scan_end_raw[3:0]; }
+    }
+
+    var scan_last: 'p logic;
+    assign scan_last = (scan_row_r == scan_end_r);
+
+    var sram_rd_en : 'p logic;
+    var sram_addr_v: 'p logic<4>;
+    assign sram_rd_en = is_scan | (in_scan & ~scan_last);
+    always_comb {
+        if is_scan             { sram_addr_v = fA; }
+        else                   { sram_addr_v = scan_row_r + 4'd1; }
+    }
+    always_comb {
+        if sram_rd_en { sram_addr = sram_addr_v; }
+        else          { sram_addr = 4'd0; }
+    }
+    assign sram_csb = ~sram_rd_en;
+    assign sram_web    = 1'b1;
+    assign sram_din    = 32'd0;
+
+    always_ff (clk) {
+        dreg_r = sram_dout;
+    }
+    assign dreg = sram_dout;
+
+    assign pc       = pc_r;
+    assign scan_op  = fC[2:0];
+    // use_xor is captured at SCAN issue; four hades_dupff copies, one per compute byte lane.
+    for i in 0..4 :g_ux {
+        inst u_ux: hades_dupff (
+            clk                    ,
+            rst_n                  ,
+            en   : is_scan         ,
+            d    : ~fC[2]          ,
+            q    : use_xor_o[i]    ,
+        );
+    }
+    assign sta_en   = is_sta;
+    assign rst_init = is_scan & ~fC[3];
+    assign upd_en   = in_scan;
+    assign scan_row = scan_row_r;
+    assign emit_src = fA;
+    assign emit_en  = is_emit;
+    assign busy     = ~in_fetch & ~in_halt;
+    assign halted   = in_halt;
+
+    assign wb_en  = (is_waitbyte | in_wait) & strobe;
+    assign wb_dst = fA[3:2];
+    assign wb_pos = fA[1:0];
+
+    assign q_wr_en  = is_ldq;
+    assign q_wr_dat = dreg_r;
+    assign a_wr_en  = is_lda;
+    assign a_wr_dat = dreg_r;
+    assign m_wr_en  = is_ldm | is_clrmsk;
+    always_comb {
+        if is_clrmsk { m_wr_dat = 32'hFFFF_FFFF; }
+        else         { m_wr_dat = dreg_r; }
+    }
+
+    // BRANCH target = (PC+1 + {fB,fC}) mod 32
+    var off8        : 'p logic<8>;
+    var b_target    : 'p logic<5>;
+    var branch_taken: 'p logic;
+    assign off8     = {fB, fC};
+    assign b_target = pc_r + 5'd1 + off8[4:0];
+    always_comb {
+        case fA {
+            4'd0:    branch_taken = 1'b1;
+            4'd1:    branch_taken = br_threshold_hit;
+            4'd2:    branch_taken = ~br_threshold_hit;
+            4'd3:    branch_taken = br_min_valid;
+            4'd4:    branch_taken = br_count_nz;
+            4'd5:    branch_taken = br_match_nz;
+            4'd6:    branch_taken = br_a_zero;
+            4'd7:    branch_taken = ~br_a_zero;
+            default: branch_taken = 1'b0;
+        }
+    }
+
+    var pc_nx: 'p logic<5>;
+    always_comb {
+        pc_nx = pc_r;
+        if in_fetch {
+            if is_halt {
+                pc_nx = pc_r;
+            } else if is_scan {
+                pc_nx = pc_r;
+            } else if is_waitbyte {
+                if strobe { pc_nx = pc_r + 5'd1; }
+            } else if is_branch {
+                if branch_taken { pc_nx = b_target; }
+                else            { pc_nx = pc_r + 5'd1; }
+            } else {
+                pc_nx = pc_r + 5'd1;
+            }
+        } else if in_scan {
+            if scan_last { pc_nx = pc_r + 5'd1; }
+        } else if in_wait {
+            if strobe { pc_nx = pc_r + 5'd1; }
+        }
+    }
+    assign pc_next = pc_nx;
+
+    always_ff (clk, rst_n) {
+        if_reset {
+            fsm        = 3'd0;
+            pc_r       = 5'd0;
+            scan_row_r = 4'd0;
+            scan_end_r = 4'd0;
+        } else {
+            pc_r = pc_nx;
+            if in_fetch {
+                if is_halt {
+                    fsm = 3'd3;
+                } else if is_scan {
+                    scan_row_r = fA;
+                    scan_end_r = scan_end_clamp;
+                    fsm        = 3'd1;
+                } else if is_waitbyte {
+                    if strobe {
+                    } else {
+                        fsm = 3'd2;
+                    }
+                } else if is_branch {
+                    if branch_taken {
+                    } else {
+                    }
+                } else {
+                }
+            } else if in_scan {
+                if scan_last {
+                    fsm  = 3'd0;
+                } else {
+                    scan_row_r = scan_row_r + 4'd1;
+                }
+            } else if in_wait {
+                if strobe {
+                    fsm  = 3'd0;
+                }
+            }
+        }
+    }
+}

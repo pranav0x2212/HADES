@@ -1,0 +1,346 @@
+// TT26 pin assignment:
+//   uo_out[7:0]  = EMIT data (registered; valid when uio_out[0]=READY)
+//   uio_out[0]   = READY   (DUT -> host: byte on uo_out is valid)
+//   uio_out[1]   = BUSY    (DUT -> host: executing)
+//   uio_out[2]   = HALT    (DUT -> host: halted)
+//   uio_in[3]    = STROBE  (host -> DUT: ui_in[7:0] is valid for WAITBYTE)
+//   uio_oe       = 8'b0000_0111  (bits 0-2 output; bit 3 input for STROBE)
+module hades_top (
+    clk       : input  'p clock          ,
+    clk_n     : input  'p clock_negedge  ,
+    rst_n     : input  'p reset_async_low,
+    ui_in     : input  'p logic<8>       ,
+    uio_in    : input  'p logic<8>       ,
+    uo_out    : output 'p logic<8>       ,
+    uio_out   : output 'p logic<8>       ,
+    uio_oe    : output 'p logic<8>       ,
+    // rf_top macro (32x32, 2R1W, 1-cycle sync read): words 0-15 = data rows, words 16-31 = packed program
+    rf_w_data : output 'p logic<32>      ,
+    rf_w_addr : output 'p logic<5>       ,
+    rf_w_ena  : output 'p logic          ,
+    rf_ra_addr: output 'p logic<5>       ,
+    rf_rb_addr: output 'p logic<5>       ,
+    rf_ra_data: input  'p logic<32>      ,
+    rf_rb_data: input  'p logic<32>      ,
+    pm_wr_en  : input  'p logic          ,
+    pm_wr_addr: input  'p logic<5>       ,
+    pm_wr_data: input  'p logic<16>      ,
+    exec_req  : input  'p logic          ,
+) {
+    var pc           : 'p logic<5>;
+    var instr        : 'p logic<16>;
+    var rst_init     : 'p logic;
+    var upd_en       : 'p logic;
+    var scan_row     : 'p logic<4>;
+    var scan_op      : 'p logic<3>;
+    var use_xor      : 'p logic<4>;
+    var dreg         : 'p logic<32>;
+    var q            : 'p logic<32>;
+    var a            : 'p logic<32>;
+    var mask         : 'p logic<32>;
+    var d            : 'p logic<6>;
+    var exact_hit    : 'p logic;
+    var masked_row   : 'p logic<32>;
+    var min_dist     : 'p logic<5>;
+    var min_idx      : 'p logic<4>;
+    var min2_dist    : 'p logic<5>;
+    var min2_idx     : 'p logic<4>;
+    var min_valid    : 'p logic;
+    var threshold_hit: 'p logic;
+    var match        : 'p logic<16>;
+    var count_out    : 'p logic<5>;
+    var emit_src     : 'p logic<4>;
+    var emit_en      : 'p logic;
+    var busy         : 'p logic;
+    var halted       : 'p logic;
+    var q_wr_en      : 'p logic;
+    var q_wr_dat     : 'p logic<32>;
+    var a_wr_en      : 'p logic;
+    var a_wr_dat     : 'p logic<32>;
+    var a_wr2_en     : 'p logic;
+    var a_wr2_dat    : 'p logic<32>;
+    var m_wr_en      : 'p logic;
+    var m_wr_dat     : 'p logic<32>;
+    var strobe       : 'p logic;
+    var wb_en        : 'p logic;
+    var wb_dst       : 'p logic<2>;
+    var wb_pos       : 'p logic<2>;
+    var br_threshold_hit: 'p logic;
+    var br_min_valid    : 'p logic;
+    var br_count_nz     : 'p logic;
+    var br_match_nz     : 'p logic;
+    var br_a_zero       : 'p logic;
+    var q_wr_en_m    : 'p logic;
+    var q_wr_dat_m   : 'p logic<32>;
+    var a_wr_en_m    : 'p logic;
+    var a_wr_dat_m   : 'p logic<32>;
+    var m_wr_en_m    : 'p logic<4>;
+    var m_wr_dat_m   : 'p logic<32>;
+    var byte_mask    : 'p logic<32>;
+    var byte_sft     : 'p logic<32>;
+    var sram_addr    : 'p logic<4>;
+    var sram_csb     : 'p logic;
+    var sram_web     : 'p logic;
+    var sram_din     : 'p logic<32>;
+    var pc_next      : 'p logic<5>;
+    var sta_en       : 'p logic;
+
+    // Post-reset sweep HALT-fills program words 16-31 (data rows 0-15 are retained through reset).
+    var sw       : 'p logic<4>;
+    var init_done: 'p logic;
+    var lo_buf   : 'p logic<16>;
+    var instr_raw: 'p logic<16>;
+    // run=0: ctrl held in reset and HALT is presented. An accepted exec_req (only after init_done) restarts
+    // ctrl at PC 0; Q/A/MASK/result registers keep their values.
+    var run      : 'p logic;
+    var go       : 'p logic;
+    let rst_n_c  : 'p reset_async_low = rst_n & run;
+
+    always_ff (clk, rst_n) {
+        if_reset {
+            sw        = 4'd0;
+            init_done = 1'b0;
+        } else if ~init_done {
+            sw = sw + 4'd1;
+            if sw == 4'd15 { init_done = 1'b1; }
+        }
+    }
+
+    always_ff (clk, rst_n) {
+        if_reset {
+            run = 1'b0;
+            go  = 1'b0;
+        } else if exec_req & init_done {
+            run = 1'b0;
+            go  = 1'b1;
+        } else {
+            go = 1'b0;
+            if go { run = 1'b1; }
+        }
+    }
+
+    // Program load: even slot -> {HALT, data} and buffer the low half; odd slot -> {data, buffered low}.
+    always_ff (clk) {
+        if pm_wr_en & ~pm_wr_addr[0] { lo_buf = pm_wr_data; }
+    }
+
+    // Single write port; priority: post-reset sweep > program load > STA.
+    always_comb {
+        if ~init_done {
+            rf_w_ena  = 1'b1;
+            rf_w_addr = {1'b1, sw};
+            rf_w_data = 32'h8000_8000;
+        } else if pm_wr_en {
+            rf_w_ena  = 1'b1;
+            rf_w_addr = {1'b1, pm_wr_addr[4:1]};
+            if pm_wr_addr[0] { rf_w_data = {pm_wr_data, lo_buf}; }
+            else             { rf_w_data = {16'h8000, pm_wr_data}; }
+        } else {
+            rf_w_ena  = sta_en;
+            rf_w_addr = {1'b0, instr[11:8]};
+            rf_w_data = a;
+        }
+    }
+
+    // Fetch: RF read-A samples the NEXT pc; pc[0] picks the instruction half (no fetch bubble).
+    assign rf_ra_addr = {1'b1, pc_next[4:1]};
+    assign rf_rb_addr = {1'b0, sram_addr};
+    always_comb {
+        if pc[0] { instr_raw = rf_ra_data[31:16]; }
+        else     { instr_raw = rf_ra_data[15:0]; }
+    }
+    // Until execution is requested (and during the post-reset sweep) present the HALT opcode: the fetched word may be
+    // undefined, and the idle ctrl (held in reset, FSM=fetch) must not decode/act on program slot 0.
+    always_comb {
+        if run { instr = instr_raw; }
+        else         { instr = {4'h8, instr_raw[11:0]}; }
+    }
+
+    assign strobe = uio_in[3];
+
+    assign br_threshold_hit = threshold_hit;
+    assign br_min_valid     = min_valid;
+    always_comb {
+        if count_out == 5'd0 { br_count_nz = 1'b0; } else { br_count_nz = 1'b1; }
+    }
+    always_comb {
+        if match == 16'd0 { br_match_nz = 1'b0; } else { br_match_nz = 1'b1; }
+    }
+    always_comb {
+        if a == 32'd0 { br_a_zero = 1'b1; } else { br_a_zero = 1'b0; }
+    }
+
+    inst u_ctrl: ctrl (
+        clk              ,
+        clk_n            ,
+        rst_n : rst_n_c  ,
+        instr            ,
+        pc               ,
+        pc_next          ,
+        sta_en           ,
+        rst_init         ,
+        upd_en           ,
+        scan_row         ,
+        scan_op          ,
+        use_xor_o : use_xor ,
+        sram_addr        ,
+        sram_csb         ,
+        sram_web         ,
+        sram_din         ,
+        dreg             ,
+        sram_dout : rf_rb_data ,
+        q_wr_en          ,
+        q_wr_dat         ,
+        a_wr_en          ,
+        a_wr_dat         ,
+        m_wr_en          ,
+        m_wr_dat         ,
+        emit_src         ,
+        emit_en          ,
+        strobe           ,
+        wb_en            ,
+        wb_dst           ,
+        wb_pos           ,
+        br_threshold_hit ,
+        br_min_valid     ,
+        br_count_nz      ,
+        br_match_nz      ,
+        br_a_zero        ,
+        busy             ,
+        halted           ,
+    );
+
+    always_comb {
+        if wb_pos == 2'd0 {
+            byte_mask = 32'h000000FF;
+            byte_sft  = {24'b0, ui_in};
+        } else if wb_pos == 2'd1 {
+            byte_mask = 32'h0000FF00;
+            byte_sft  = {16'b0, ui_in, 8'b0};
+        } else if wb_pos == 2'd2 {
+            byte_mask = 32'h00FF0000;
+            byte_sft  = {8'b0, ui_in, 16'b0};
+        } else {
+            byte_mask = 32'hFF000000;
+            byte_sft  = {ui_in, 24'b0};
+        }
+    }
+
+    always_comb {
+        if wb_en & (wb_dst == 2'd0) {
+            q_wr_en_m  = 1'b1;
+            q_wr_dat_m = (q & ~byte_mask) | byte_sft;
+        } else {
+            q_wr_en_m  = q_wr_en;
+            q_wr_dat_m = q_wr_dat;
+        }
+    }
+
+    always_comb {
+        if a_wr2_en {
+            a_wr_en_m = 1'b1; a_wr_dat_m = a_wr2_dat;
+        } else if wb_en & (wb_dst == 2'd1) {
+            a_wr_en_m = 1'b1; a_wr_dat_m = (a & ~byte_mask) | byte_sft;
+        } else {
+            a_wr_en_m = a_wr_en; a_wr_dat_m = a_wr_dat;
+        }
+    }
+
+    // MASK is written per byte lane (WAITBYTE lane k, or LDM/CLRMASK on all lanes).
+    var m_hit: 'p logic<4>;
+    always_comb {
+        for k in 0..4 {
+            m_hit[k] = wb_en & (wb_dst == 2'd2) & (wb_pos == (k as 2));
+        }
+    }
+    always_comb {
+        for k in 0..4 {
+            m_wr_en_m[k] = m_hit[k] | m_wr_en;
+            if m_hit[k] { m_wr_dat_m[8*k+:8] = ui_in; }
+            else        { m_wr_dat_m[8*k+:8] = m_wr_dat[8*k+:8]; }
+        }
+    }
+
+    inst u_regs: regs (
+        clk              ,
+        rst_n            ,
+        q_wr_en  : q_wr_en_m  ,
+        q_wr_dat : q_wr_dat_m ,
+        a_wr_en  : a_wr_en_m  ,
+        a_wr_dat : a_wr_dat_m ,
+        m_wr_en  : m_wr_en_m  ,
+        m_wr_dat : m_wr_dat_m ,
+        q                ,
+        a                ,
+        mask             ,
+    );
+
+    inst u_compute: compute (
+        row_data   : dreg      ,
+        q                      ,
+        mask                   ,
+        use_xor                ,
+        d                      ,
+        exact_hit              ,
+        masked_row             ,
+    );
+
+    inst u_result_regs: result_regs (
+        clk              ,
+        rst_n            ,
+        rst_init         ,
+        upd_en           ,
+        scan_op          ,
+        d                ,
+        exact_hit        ,
+        masked_row       ,
+        row     : scan_row ,
+        a_in    : a        ,
+        min_dist         ,
+        min_idx          ,
+        min2_dist        ,
+        min2_idx         ,
+        min_valid        ,
+        threshold_hit    ,
+        match            ,
+        count_out        ,
+        a_wr2_en         ,
+        a_wr2_dat        ,
+    );
+
+    var emit_mux: 'p logic<8>;
+    always_comb {
+        case emit_src {
+            4'd0:    emit_mux = {4'b0, min_idx};
+            4'd1:    emit_mux = {3'b0, min_dist};
+            4'd2:    emit_mux = a[7:0];
+            4'd3:    emit_mux = a[15:8];
+            4'd4:    emit_mux = a[23:16];
+            4'd5:    emit_mux = a[31:24];
+            4'd6:    emit_mux = match[7:0];
+            4'd7:    emit_mux = match[15:8];
+            4'd8:    emit_mux = {3'b0, count_out};
+            4'd9:    emit_mux = {6'b0, threshold_hit, min_valid};
+            4'd10:   emit_mux = {4'b0, min2_idx};
+            4'd11:   emit_mux = {3'b0, min2_dist};
+            default: emit_mux = 8'hFF;
+        }
+    }
+
+    var uo_out_r: 'p logic<8>;
+    var ready_r : 'p logic;
+
+    always_ff (clk, rst_n) {
+        if_reset {
+            uo_out_r = 8'd0;
+            ready_r  = 1'b0;
+        } else {
+            ready_r = emit_en;
+            if emit_en { uo_out_r = emit_mux; }
+        }
+    }
+
+    assign uo_out  = uo_out_r;
+    assign uio_out = {5'b0, halted, busy, ready_r};
+    assign uio_oe  = 8'b0000_0111;
+}

@@ -1,0 +1,185 @@
+// scan_op: 0 = HAMMING 1 = HAMMING2 2 = THRESHOLD 3 = EXACT 4 = R_OR 5 = R_AND 6 = R_POP 7 = R_MAXPOP
+// Late predicates (lt, lt2, gt, thresh_ok, exact_hit) gate the enables last, for timing.
+module result_regs (
+    clk          : input  'p clock          ,
+    rst_n        : input  'p reset_async_low,
+    rst_init     : input  'p logic          ,
+    upd_en       : input  'p logic          ,
+    scan_op      : input  'p logic<3>       ,
+    d            : input  'p logic<6>       ,
+    exact_hit    : input  'p logic          ,
+    masked_row   : input  'p logic<32>      ,
+    row          : input  'p logic<4>       ,
+    a_in         : input  'p logic<32>      ,
+    min_dist     : output 'p logic<5>       ,
+    min_idx      : output 'p logic<4>       ,
+    min2_dist    : output 'p logic<5>       ,
+    min2_idx     : output 'p logic<4>       ,
+    min_valid    : output 'p logic          ,
+    threshold_hit: output 'p logic          ,
+    match        : output 'p logic<16>      ,
+    count_out    : output 'p logic<5>       ,
+    a_wr2_en     : output 'p logic          ,
+    a_wr2_dat    : output 'p logic<32>      ,
+) {
+    var min_dist_r     : 'p logic<5>;
+    var min_idx_r      : 'p logic<4>;
+    var min2_dist_r    : 'p logic<5>;
+    var min2_idx_r     : 'p logic<4>;
+    var min_valid_r    : 'p logic;
+    var threshold_hit_r: 'p logic;
+    var match_r        : 'p logic<16>;
+    var count_r        : 'p logic<5>;
+
+    var op0: 'p logic;
+    var op1: 'p logic;
+    var op2: 'p logic;
+    var op3: 'p logic;
+    var op4: 'p logic;
+    var op5: 'p logic;
+    var op6: 'p logic;
+    var op7: 'p logic;
+    var go : 'p logic;
+    assign op0 = (scan_op == 3'd0);
+    assign op1 = (scan_op == 3'd1);
+    assign op2 = (scan_op == 3'd2);
+    assign op3 = (scan_op == 3'd3);
+    assign op4 = (scan_op == 3'd4);
+    assign op5 = (scan_op == 3'd5);
+    assign op6 = (scan_op == 3'd6);
+    assign op7 = (scan_op == 3'd7);
+    assign go  = upd_en & ~rst_init;
+
+    var match_bit: 'p logic<16>;
+    assign match_bit = 16'd1 << row;
+
+    var lt       : 'p logic;
+    var lt2      : 'p logic;
+    var gt       : 'p logic;
+    var thresh_ok: 'p logic;
+    assign lt        = ~d[5] & (d[4:0] <: min_dist_r);
+    assign lt2       = ~d[5] & (d[4:0] <: min2_dist_r);
+    assign gt        = d[5] | (d[4:0] >: min_dist_r);
+    assign thresh_ok = (|a_in[7:6]) | (a_in[5:0] >= d);
+
+    // REDUCE_POP add is a 6-bit late add plus a precomputed (A[31:6] + 1) selected by the carry.
+    var lo_sum : 'p logic<7>;
+    var hi_inc : 'p logic<26>;
+    var pop_hi : 'p logic<26>;
+    var pop_sum: 'p logic<32>;
+    assign lo_sum  = {1'b0, a_in[5:0]} + {1'b0, d};
+    assign hi_inc  = a_in[31:6] + 26'd1;
+    always_comb {
+        if lo_sum[6] { pop_hi = hi_inc; } else { pop_hi = a_in[31:6]; }
+    }
+    assign pop_sum = {pop_hi, lo_sum[5:0]};
+
+    always_comb {
+        a_wr2_en  = 1'b0;
+        a_wr2_dat = 32'd0;
+        if rst_init {
+            if op4 {
+                a_wr2_en  = 1'b1;
+                a_wr2_dat = 32'd0;
+            } else if op5 {
+                a_wr2_en  = 1'b1;
+                a_wr2_dat = 32'hFFFF_FFFF;
+            } else if op6 {
+                a_wr2_en  = 1'b1;
+                a_wr2_dat = 32'd0;
+            }
+        } else if upd_en {
+            if op4 {
+                a_wr2_en  = 1'b1;
+                a_wr2_dat = a_in | masked_row;
+            } else if op5 {
+                a_wr2_en  = 1'b1;
+                a_wr2_dat = a_in & masked_row;
+            } else if op6 {
+                a_wr2_en  = 1'b1;
+                a_wr2_dat = pop_sum;
+            }
+        }
+    }
+
+    var init_min_hi: 'p logic;
+    var init_min_lo: 'p logic;
+    var init_min   : 'p logic;
+    var init_m2    : 'p logic;
+    var init_mc    : 'p logic;
+    var init_th    : 'p logic;
+    assign init_min_lo = rst_init & (op0 | op1 | op2);
+    assign init_min_hi = rst_init & op7;
+    assign init_min    = init_min_lo | init_min_hi;
+    assign init_m2     = rst_init & op1;
+    assign init_mc     = rst_init & (op2 | op3);
+    assign init_th     = rst_init & op2;
+
+    var min_take   : 'p logic;
+    var m2_from_min: 'p logic;
+    var m2_from_d  : 'p logic;
+    var mhit       : 'p logic;
+    var cnt_inc    : 'p logic;
+    assign min_take    = go & (((op0 | op1 | op2) & lt) | (op7 & gt));
+    assign m2_from_min = go & op1 & lt;
+    assign m2_from_d   = go & op1 & ~lt & lt2;
+    assign mhit        = go & ((op2 & thresh_ok) | (op3 & exact_hit));
+    assign cnt_inc     = mhit & (count_r != 5'd31);
+
+    always_ff (clk, rst_n) {
+        if_reset {
+            min_dist_r      = 5'h1F;
+            min_idx_r       = 4'd0;
+            min2_dist_r     = 5'h1F;
+            min2_idx_r      = 4'd0;
+            min_valid_r     = 1'b0;
+            threshold_hit_r = 1'b0;
+            match_r         = 16'd0;
+            count_r         = 5'd0;
+        } else {
+            if init_min {
+                if init_min_lo { min_dist_r = 5'h1F; } else { min_dist_r = 5'd0; }
+                min_idx_r = 4'd0;
+            } else if min_take {
+                min_dist_r = d[4:0];
+                min_idx_r  = row;
+            }
+            if init_m2 {
+                min2_dist_r = 5'h1F;
+                min2_idx_r  = 4'd0;
+            } else if m2_from_min {
+                min2_dist_r = min_dist_r;
+                min2_idx_r  = min_idx_r;
+            } else if m2_from_d {
+                min2_dist_r = d[4:0];
+                min2_idx_r  = row;
+            }
+            if init_min {
+                min_valid_r = 1'b0;
+            } else if go & (op0 | op1 | op2 | op7) {
+                min_valid_r = 1'b1;
+            }
+            if init_th {
+                threshold_hit_r = 1'b0;
+            } else if go & op2 & thresh_ok {
+                threshold_hit_r = 1'b1;
+            }
+            if init_mc {
+                match_r = 16'd0;
+                count_r = 5'd0;
+            } else if mhit {
+                match_r = match_r | match_bit;
+                if cnt_inc { count_r = count_r + 5'd1; }
+            }
+        }
+    }
+
+    assign min_dist      = min_dist_r;
+    assign min_idx       = min_idx_r;
+    assign min2_dist     = min2_dist_r;
+    assign min2_idx      = min2_idx_r;
+    assign min_valid     = min_valid_r;
+    assign threshold_hit = threshold_hit_r;
+    assign match         = match_r;
+    assign count_out     = count_r;
+}
