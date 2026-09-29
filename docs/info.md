@@ -24,6 +24,4 @@ A reset erases the program. Loading a program while it is executing is not suppo
 | uio[5] | in | EXECUTE (rising edge) |
 
 ### How to test
-`sim/run_all.sh` runs the full RTL regression (reset/initialisation, loader packing, EXECUTE/restart and invalid-timing cases, every SCAN op,
-WAITBYTE/MASK/STA, branches, and 15 golden workloads with fetch and cycle-count checks). `test/` holds the Tiny Tapeout cocotb tests, which run at RTL
-and at gate level (`make sim`, `make -B GATES=yes`).
+The cocotb tests in `test/` drive only the chip pins and run at RTL and at gate level (`make sim`, `make -B GATES=yes`).
