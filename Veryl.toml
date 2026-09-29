@@ -1,5 +1,5 @@
 [project]
-name = "hades_v0"
+name = "hades"
 version = "0.1.0"
 
 [build]
