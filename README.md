@@ -1,42 +1,37 @@
-![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
+# HADES v1 — processing-near-memory Hamming search engine
 
-# Tiny Tapeout Verilog Project Template
+[![gds](../../workflows/gds/badge.svg)](../../actions/workflows/gds.yaml) [![test](../../workflows/test/badge.svg)](../../actions/workflows/test.yaml) [![docs](../../workflows/docs/badge.svg)](../../actions/workflows/docs.yaml)
 
-- [Read the documentation for project](docs/info.md)
+HADES is a small Tiny Tapeout (SKY130, `ttsky26d`, **3×2 tiles**) accelerator for masked binary similarity search. A host loads a
+16-bit-instruction program (32 slots) and up to 16 rows of 32 bits into one on-chip TNT `rf_top` register file; the engine then
+scans rows (Hamming distance, top-2, threshold bitmap, exact match, OR/AND/popcount reductions) and streams results back over an
+8-bit port. See [docs/info.md](docs/info.md) for how to use it.
 
-## What is Tiny Tapeout?
+## Quick start (host view)
+1. Reset, wait 16 clocks (program memory is initialised to HALT).
+2. Load the program with the byte-serial loader (`uio[4]` LD_STROBE, bytes on `ui[7:0]`, high byte first).
+3. Rising edge on `uio[5]` (EXECUTE): the program starts at instruction 0. Another EXECUTE restarts it.
+4. WAITBYTE data in through `ui[7:0]` + `uio[3]` (STROBE); EMIT bytes out on `uo[7:0]` while `uio[0]` (READY) is high; `uio[1]` = BUSY, `uio[2]` = HALT.
 
-Tiny Tapeout is an educational project that aims to make it easier and cheaper than ever to get your digital and analog designs manufactured on a real chip.
+## Repository layout
+| Path | Content |
+|---|---|
+| `src-veryl/` | **Source of truth**: the RTL, written in [Veryl](https://veryl-lang.org) (0.21) |
+| `src/` | Generated SystemVerilog (`veryl build`), the Verilog TT wrapper `tt_um_hades.v`, the `rf_top.v` simulation model, `config.json` |
+| `macro/rf_top/` | TNT `rf_top` register-file macro (GDS/LEF/LIB) with provenance notes |
+| `sim/` | Canonical RTL regression (`run_all.sh`, `tb.v`, golden workload vectors) |
+| `test/` | Tiny Tapeout cocotb tests (RTL and gate level) |
+| `docs/` | `info.md` (project datasheet page) |
+| `experiments/` | Historical investigations and superseded testbenches (not part of the build) |
 
-To learn more and get started, visit https://tinytapeout.com.
+## Build and test
+```sh
+veryl build                # regenerate src/*.sv from src-veryl/ (generated files are committed; CI does not run Veryl)
+sim/run_all.sh          # full RTL regression (Icarus Verilog)
+cd test && make sim        # Tiny Tapeout cocotb tests, RTL
+cd test && make -B GATES=yes   # gate level (needs the hardened netlist as test/gate_level_netlist.v and PDK_ROOT)
+```
+The GitHub Actions run the Tiny Tapeout flow (`gds`, `precheck`, `gl_test`), `test` (cocotb) and `docs`.
 
-## Set up your Verilog project
-
-1. Add your Verilog files to the `src` folder.
-2. Edit the [info.yaml](info.yaml) and update information about your project, paying special attention to the `source_files` and `top_module` properties. If you are upgrading an existing Tiny Tapeout project, check out our [online info.yaml migration tool](https://tinytapeout.github.io/tt-yaml-upgrade-tool/).
-3. Edit [docs/info.md](docs/info.md) and add a description of your project.
-4. Adapt the testbench to your design. See [test/README.md](test/README.md) for more information.
-
-The GitHub action will automatically build the ASIC files using [LibreLane](https://www.zerotoasiccourse.com/terminology/librelane/).
-
-## Enable GitHub actions to build the results page
-
-- [Enabling GitHub Pages](https://tinytapeout.com/faq/#my-github-action-is-failing-on-the-pages-part)
-
-## Resources
-
-- [FAQ](https://tinytapeout.com/faq/)
-- [Digital design lessons](https://tinytapeout.com/digital_design/)
-- [Learn how semiconductors work](https://tinytapeout.com/siliwiz/)
-- [Join the community](https://tinytapeout.com/discord)
-- [Build your design locally](https://www.tinytapeout.com/guides/local-hardening/)
-
-## What next?
-
-- [Submit your design to the next shuttle](https://app.tinytapeout.com/).
-- Edit [this README](README.md) and explain your design, how it works, and how to test it.
-- Share your project on your social network of choice:
-  - LinkedIn [#tinytapeout](https://www.linkedin.com/search/results/content/?keywords=%23tinytapeout) [@TinyTapeout](https://www.linkedin.com/company/100708654/)
-  - Mastodon [#tinytapeout](https://chaos.social/tags/tinytapeout) [@matthewvenn](https://chaos.social/@matthewvenn)
-  - X (formerly Twitter) [#tinytapeout](https://twitter.com/hashtag/tinytapeout) [@tinytapeout](https://twitter.com/tinytapeout)
-  - Bluesky [@tinytapeout.com](https://bsky.app/profile/tinytapeout.com)
+## License
+Apache-2.0 (see [LICENSE](LICENSE)). The `rf_top` macro is by Sylvain Munaut / Tiny Tapeout — see [RF Macro](https://tinytapeout.com/chips/ttsky25a/tt_um_tnt_rf_test).
