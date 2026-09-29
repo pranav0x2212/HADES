@@ -1,6 +1,3 @@
-# Makefile
-# See https://docs.cocotb.org/en/stable/quickstart.html for more info
-
 SIM ?= icarus
 FST ?= -fst
 TOPLEVEL_LANG ?= verilog
@@ -11,16 +8,18 @@ COMPILE_ARGS += -g2012
 ifneq ($(GATES),yes)
 
 SIM_BUILD = sim_build/rtl
-FIXED_CORE_SV = $(SIM_BUILD)/hades_v0_core_fixed.sv
-$(FIXED_CORE_SV): $(SRC_DIR)/hades_v0_core.sv | $(SIM_BUILD)
-	sed 's/input  var logic/input  logic/g' $< > $@
+CORE_SV   = compute regs result_regs ctrl hades_top hades_dupff
+FIXED_SV  = $(addprefix $(SIM_BUILD)/,$(addsuffix .sv,$(CORE_SV)))
 
 $(SIM_BUILD):
 	mkdir -p $@
 
-VERILOG_SOURCES += $(SRC_DIR)/tt_um_hades_v0.v
-VERILOG_SOURCES += $(FIXED_CORE_SV)
-VERILOG_SOURCES += $(PWD)/sky130_sram_1rw_tiny.v
+$(SIM_BUILD)/%.sv: $(SRC_DIR)/%.sv | $(SIM_BUILD)
+	sed 's/input var logic/input logic/g; s/input  var logic/input  logic/g' $< > $@
+
+VERILOG_SOURCES += $(SRC_DIR)/tt_um_hades.v
+VERILOG_SOURCES += $(SRC_DIR)/rf_top.v
+VERILOG_SOURCES += $(FIXED_SV)
 
 else
 
@@ -33,7 +32,7 @@ COMPILE_ARGS            += -DUNIT_DELAY=\#1
 VERILOG_SOURCES         += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/primitives.v
 VERILOG_SOURCES         += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/sky130_fd_sc_hd.v
 VERILOG_SOURCES         += $(PWD)/gate_level_netlist.v
-VERILOG_SOURCES         += $(PWD)/sky130_sram_1rw_tiny.v
+VERILOG_SOURCES         += $(SRC_DIR)/rf_top.v
 
 endif
 
