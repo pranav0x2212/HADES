@@ -14,7 +14,7 @@ test/gate_level_netlist.v
 
 # Veryl build artifacts
 src/*.sv.map
-hades_v0.f
+hades.f
 .build/
 dependencies/
 
@@ -28,3 +28,11 @@ experiments/veryl_v0/abc.history
 
 # Yosys / EDA scratchpad artifacts
 abc.history
+
+# Python / simulation byproducts
+__pycache__/
+*.pyc
+*.vvp
+sim/**/results*
+test/tb.fst
+test/gate_level_netlist.v
