@@ -5,7 +5,7 @@ project:
   discord:      "prawns_1205"
   description:  "16x32 masked Hamming/threshold/reduce search engine with a 32-instruction program"
   language:     "Verilog"
-  clock_hz:     50000000
+  clock_hz:     40000000
 
   tiles: "3x2"
 
