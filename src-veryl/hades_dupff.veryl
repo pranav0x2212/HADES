@@ -1,0 +1,14 @@
+// keep_hierarchy stops synthesis merging the four use_xor copies back into one high-fanout flop.
+#[sv("keep_hierarchy")]
+module hades_dupff (
+    clk  : input  'p clock          ,
+    rst_n: input  'p reset_async_low,
+    en   : input  'p logic          ,
+    d    : input  'p logic          ,
+    q    : output 'p logic          ,
+) {
+    always_ff (clk, rst_n) {
+        if_reset { q = 1'b1; }
+        else if en { q = d; }
+    }
+}

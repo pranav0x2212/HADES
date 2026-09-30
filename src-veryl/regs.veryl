@@ -1,0 +1,37 @@
+// Q and A have no reset; MASK resets to all ones.
+module regs (
+    clk      : input  'p clock          ,
+    rst_n    : input  'p reset_async_low,
+    q_wr_en  : input  'p logic          ,
+    q_wr_dat : input  'p logic<32>      ,
+    a_wr_en  : input  'p logic          ,
+    a_wr_dat : input  'p logic<32>      ,
+    m_wr_en  : input  'p logic<4>       ,
+    m_wr_dat : input  'p logic<32>      ,
+    q        : output 'p logic<32>      ,
+    a        : output 'p logic<32>      ,
+    mask     : output 'p logic<32>      ,
+) {
+    var q_r   : 'p logic<32>;
+    var a_r   : 'p logic<32>;
+    var mask_r: 'p logic<32>;
+
+    always_ff (clk, rst_n) {
+        if_reset {
+            mask_r = 32'hFFFF_FFFF;
+        } else {
+            for k in 0..4 {
+                if m_wr_en[k] { mask_r[8*k+:8] = m_wr_dat[8*k+:8]; }
+            }
+        }
+    }
+
+    always_ff (clk) {
+        if q_wr_en { q_r = q_wr_dat; }
+        if a_wr_en { a_r = a_wr_dat; }
+    }
+
+    assign q    = q_r;
+    assign a    = a_r;
+    assign mask = mask_r;
+}

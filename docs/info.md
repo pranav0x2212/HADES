@@ -1,49 +1,27 @@
-## HADES v0
+## HADES v1
 
-HADES v0 is a masked Hamming-distance nearest-neighbour search engine. It stores up to 16 32-bit entries in on-chip SRAM and, on command, scans all entries to find the one with the lowest popcount(XOR) distance to a query vector, subject to a bit-mask. It also returns a threshold-match bitmap indicating which entries fall within a given distance.
+HADES v1 is a masked Hamming-distance nearest-neighbour / threshold / reduction search engine driven by a 32-instruction, 16-bit program.
+16 rows x 32 bits of data and the 32-instruction program share one TinyTapeout register-file macro (TNT `rf_top`, 32 x 32).
 
-A full scan over 16 entries completes in exactly 18 clock cycles.
+### Using the chip
+1. Hold `rst_n` low, then release it. Wait at least **16 clocks** (the chip fills program memory with HALT).
+2. **Load the program** through the loader: put a byte on `ui[7:0]` and give `uio[4]` (LD_STROBE) a rising edge. Send each 16-bit instruction as
+   two bytes, high byte first; instructions go to slots 0, 1, 2, ... Unused slots stay HALT.
+3. Give `uio[5]` (EXECUTE) a rising edge. The program starts at instruction 0 about 2 clocks later. Another EXECUTE (running or halted) restarts at instruction 0
+   and keeps Q/A/MASK/results/data rows. EXECUTE is ignored during reset/initialisation and while a loader byte pair is incomplete.
+4. Read results on `uo[7:0]` when `uio[0]` (READY) is high (EMIT). `uio[1]` = BUSY, `uio[2]` = HALT. For WAITBYTE, put a byte on `ui[7:0]` and raise `uio[3]` (STROBE).
 
-### How it works
+A reset erases the program. Loading a program while it is executing is not supported.
 
-The core operates through a byte-serial command interface:
+### Pins
+| Pin | Direction | Function |
+|---|---|---|
+| ui[7:0] | in | WAITBYTE data / loader byte |
+| uo[7:0] | out | EMIT data (valid with READY) |
+| uio[0] / [1] / [2] | out | READY / BUSY / HALT |
+| uio[3] | in | STROBE (WAITBYTE data valid) |
+| uio[4] | in | LD_STROBE (loader byte valid, rising edge) |
+| uio[5] | in | EXECUTE (rising edge) |
 
-| `uio_in[3:1]` (op) | Action |
-|---|---|
-| 0 | Shift `ui_in` byte into query register (MSB first, 4 calls = 32-bit word) |
-| 1 | Shift `ui_in` byte into mask register |
-| 2 | Set threshold from `ui_in[5:0]` |
-| 3 | Write current query word to SRAM, post-increment address |
-| 4 | Start search |
-| 5 | Advance result selector |
-
-A command fires on the rising edge of `uio_in[0]` (strobe), synchronized through a 2-FF stage. `ui_in[7:0]` carries the data byte.
-
-Status outputs on `uio_out`:
-
-| Bit | Signal |
-|---|---|
-| 7 | `any_hit & done` |
-| 6 | `done` |
-| 5 | `busy` |
-
-Result outputs on `uo_out` (muxed by `rsel`, advanced with op 5):
-
-| `rsel` | `uo_out` content |
-|---|---|
-| 0 | `{4'b0, best_idx[3:0]}` — index of nearest neighbour |
-| 1 | `{2'b0, best_dist[5:0]}` — distance of nearest neighbour |
-| 2 | `hits[7:0]` — threshold-match bitmap, entries 0–7 |
-| 3 | `hits[15:8]` — threshold-match bitmap, entries 8–15 |
-
-### SRAM
-
-`sky130_sram_1rw_tiny` — 16 × 32-bit synchronous single-port SRAM. Inputs captured on posedge, read/write executed on negedge. SRAM control is launched from the negedge of `clk` to meet the setup window. The tapeout uses an empty DRC-clean shell GDS (`sky130_sram_1rw_tiny_shell.gds`) at placement time.
-
-### Reset
-
-Active-low, asynchronous assert, synchronous deassert (`rst_n`). A two-FF synchronizer filters `rst` for the negedge-launched SRAM control stage.
-
-### Clocking
-
-50 MHz target. Worst-case setup slack 11.979 ns at max_ss corner (STA black-boxes the SRAM — no `.lib` available).
+### How to test
+The cocotb tests in `test/` drive only the chip pins and run at RTL and at gate level (`make sim`, `make -B GATES=yes`).
