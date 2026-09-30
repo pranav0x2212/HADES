@@ -1,4 +1,6 @@
-// fsm: 0=FETCH 1=SCAN 2=WAIT 3=HALT
+// fsm: 0=FETCH 1=SCAN 2=WAIT 3=HALT 4=LD
+// LDQ/LDA/LDM take two cycles: the fetch cycle issues the synchronous RF read of row fA and holds the PC; the LD cycle
+// (instr still shows the LDx word) writes Q/A/MASK from the read data and advances the PC.
 module ctrl (
     input var logic clk  ,
     input var logic clk_n,
@@ -47,11 +49,10 @@ module ctrl (
     output var logic busy  ,
     output var logic halted
 );
-    logic [3-1:0]  fsm       ;
-    logic [5-1:0]  pc_r      ;
-    logic [4-1:0]  scan_row_r;
-    logic [4-1:0]  scan_end_r;
-    logic [32-1:0] dreg_r    ;
+    logic [3-1:0] fsm       ;
+    logic [5-1:0] pc_r      ;
+    logic [4-1:0] scan_row_r;
+    logic [4-1:0] scan_end_r;
 
     logic [4-1:0] opc;
     logic [4-1:0] fA ;
@@ -66,15 +67,18 @@ module ctrl (
     logic in_scan ;
     logic in_wait ;
     logic in_halt ;
+    logic in_ld   ;
     always_comb in_fetch = ~(fsm[2] | fsm[1] | fsm[0]);
     always_comb in_scan  = ~(fsm[2] | fsm[1]) & fsm[0];
     always_comb in_wait  = ~fsm[2] & fsm[1] & ~fsm[0];
     always_comb in_halt  = ~fsm[2] & fsm[1] & fsm[0];
+    always_comb in_ld    = fsm[2] & ~fsm[1] & ~fsm[0];
 
     logic is_scan    ;
-    logic is_ldq     ;
-    logic is_lda     ;
-    logic is_ldm     ;
+    logic ld_issue   ;
+    logic ld_q       ;
+    logic ld_a       ;
+    logic ld_m       ;
     logic is_sta     ;
     logic is_emit    ;
     logic is_waitbyte;
@@ -82,9 +86,10 @@ module ctrl (
     logic is_halt    ;
     logic is_clrmsk  ;
     always_comb is_scan     = in_fetch & (opc == 4'd4);
-    always_comb is_ldq      = in_fetch & (opc == 4'd0);
-    always_comb is_lda      = in_fetch & (opc == 4'd1);
-    always_comb is_ldm      = in_fetch & (opc == 4'd2);
+    always_comb ld_issue    = in_fetch & ((opc == 4'd0) | (opc == 4'd1) | (opc == 4'd2));
+    always_comb ld_q        = in_ld & (opc == 4'd0);
+    always_comb ld_a        = in_ld & (opc == 4'd1);
+    always_comb ld_m        = in_ld & (opc == 4'd2);
     always_comb is_sta      = in_fetch & (opc == 4'd3);
     always_comb is_emit     = in_fetch & (opc == 4'd6);
     always_comb is_waitbyte = in_fetch & (opc == 4'd5);
@@ -108,9 +113,9 @@ module ctrl (
 
     logic         sram_rd_en ;
     logic [4-1:0] sram_addr_v;
-    always_comb sram_rd_en  = is_scan | (in_scan & ~scan_last);
+    always_comb sram_rd_en  = is_scan | ld_issue | (in_scan & ~scan_last);
     always_comb begin
-        if (is_scan) begin
+        if (is_scan | ld_issue) begin
             sram_addr_v = fA;
         end else begin
             sram_addr_v = scan_row_r + 4'd1;
@@ -127,13 +132,11 @@ module ctrl (
     always_comb sram_web = 1'b1;
     always_comb sram_din = 32'd0;
 
-    always_ff @ (posedge clk) begin
-        dreg_r <= sram_dout;
-    end
     always_comb dreg = sram_dout;
 
     always_comb pc      = pc_r;
     always_comb scan_op = fC[2:0];
+    // use_xor is captured at SCAN issue; four hades_dupff copies, one per compute byte lane.
     for (genvar i = 0; i < 4; i++) begin :g_ux
         hades_dupff u_ux (
             .clk   (clk         ),
@@ -156,16 +159,16 @@ module ctrl (
     always_comb wb_dst = fA[3:2];
     always_comb wb_pos = fA[1:0];
 
-    always_comb q_wr_en  = is_ldq;
-    always_comb q_wr_dat = dreg_r;
-    always_comb a_wr_en  = is_lda;
-    always_comb a_wr_dat = dreg_r;
-    always_comb m_wr_en  = is_ldm | is_clrmsk;
+    always_comb q_wr_en  = ld_q;
+    always_comb q_wr_dat = dreg;
+    always_comb a_wr_en  = ld_a;
+    always_comb a_wr_dat = dreg;
+    always_comb m_wr_en  = ld_m | is_clrmsk;
     always_comb begin
         if (is_clrmsk) begin
             m_wr_dat = 32'hFFFF_FFFF;
         end else begin
-            m_wr_dat = dreg_r;
+            m_wr_dat = dreg;
         end
     end
 
@@ -195,7 +198,7 @@ module ctrl (
         if (in_fetch) begin
             if (is_halt) begin
                 pc_nx = pc_r;
-            end else if (is_scan) begin
+            end else if (is_scan | ld_issue) begin
                 pc_nx = pc_r;
             end else if (is_waitbyte) begin
                 if (strobe) begin
@@ -218,6 +221,8 @@ module ctrl (
             if (strobe) begin
                 pc_nx = pc_r + 5'd1;
             end
+        end else if (in_ld) begin
+            pc_nx = pc_r + 5'd1;
         end
     end
     always_comb pc_next = pc_nx;
@@ -237,6 +242,8 @@ module ctrl (
                     scan_row_r <= fA;
                     scan_end_r <= scan_end_clamp;
                     fsm        <= 3'd1;
+                end else if (ld_issue) begin
+                    fsm <= 3'd4;
                 end else if (is_waitbyte) begin
                     if (strobe) begin
                     end else begin
@@ -258,6 +265,8 @@ module ctrl (
                 if (strobe) begin
                     fsm <= 3'd0;
                 end
+            end else if (in_ld) begin
+                fsm <= 3'd0;
             end
         end
     end

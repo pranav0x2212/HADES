@@ -14,7 +14,7 @@ module hades_top (
     output var logic [8-1:0] uo_out ,
     output var logic [8-1:0] uio_out,
     output var logic [8-1:0] uio_oe ,
-
+    // rf_top macro (32x32, 2R1W, 1-cycle sync read): words 0-15 = data rows, words 16-31 = packed program
     output var logic [32-1:0] rf_w_data ,
     output var logic [5-1:0]  rf_w_addr ,
     output var logic          rf_w_ena  ,
@@ -41,9 +41,9 @@ module hades_top (
     logic [6-1:0]  d               ;
     logic          exact_hit       ;
     logic [32-1:0] masked_row      ;
-    logic [5-1:0]  min_dist        ;
+    logic [6-1:0]  min_dist        ;
     logic [4-1:0]  min_idx         ;
-    logic [5-1:0]  min2_dist       ;
+    logic [6-1:0]  min2_dist       ;
     logic [4-1:0]  min2_idx        ;
     logic          min_valid       ;
     logic          threshold_hit   ;
@@ -85,10 +85,13 @@ module hades_top (
     logic [5-1:0]  pc_next         ;
     logic          sta_en          ;
 
+    // Post-reset sweep HALT-fills program words 16-31 (data rows 0-15 are retained through reset).
     logic [4-1:0]  sw       ;
     logic          init_done;
     logic [16-1:0] lo_buf   ;
     logic [16-1:0] instr_raw;
+    // run=0: ctrl held in reset and HALT is presented. An accepted exec_req (only after init_done) restarts
+    // ctrl at PC 0; Q/A/MASK/result registers keep their values.
     logic run    ;
     logic go     ;
     logic rst_n_c; always_comb rst_n_c = rst_n & run;
@@ -120,12 +123,14 @@ module hades_top (
         end
     end
 
+    // Program load: even slot -> {HALT, data} and buffer the low half; odd slot -> {data, buffered low}.
     always_ff @ (posedge clk) begin
         if (pm_wr_en & ~pm_wr_addr[0]) begin
             lo_buf <= pm_wr_data;
         end
     end
 
+    // Single write port; priority: post-reset sweep > program load > STA.
     always_comb begin
         if (~init_done) begin
             rf_w_ena  = 1'b1;
@@ -146,6 +151,7 @@ module hades_top (
         end
     end
 
+    // Fetch: RF read-A samples the NEXT pc; pc[0] picks the instruction half (no fetch bubble).
     always_comb rf_ra_addr = {1'b1, pc_next[4:1]};
     always_comb rf_rb_addr = {1'b0, sram_addr};
     always_comb begin
@@ -155,7 +161,8 @@ module hades_top (
             instr_raw = rf_ra_data[15:0];
         end
     end
-
+    // Until execution is requested (and during the post-reset sweep) present the HALT opcode: the fetched word may be
+    // undefined, and the idle ctrl (held in reset, FSM=fetch) must not decode/act on program slot 0.
     always_comb begin
         if (run) begin
             instr = instr_raw;
@@ -269,6 +276,7 @@ module hades_top (
         end
     end
 
+    // MASK is written per byte lane (WAITBYTE lane k, or LDM/CLRMASK on all lanes).
     logic [4-1:0] m_hit;
     always_comb begin
         for (int k = 0; k < 4; k++) begin
@@ -337,7 +345,7 @@ module hades_top (
     always_comb begin
         case (emit_src)
             4'd0   : emit_mux = {4'b0, min_idx};
-            4'd1   : emit_mux = {3'b0, min_dist};
+            4'd1   : emit_mux = {2'b0, min_dist};
             4'd2   : emit_mux = a[7:0];
             4'd3   : emit_mux = a[15:8];
             4'd4   : emit_mux = a[23:16];
@@ -347,7 +355,7 @@ module hades_top (
             4'd8   : emit_mux = {3'b0, count_out};
             4'd9   : emit_mux = {6'b0, threshold_hit, min_valid};
             4'd10  : emit_mux = {4'b0, min2_idx};
-            4'd11  : emit_mux = {3'b0, min2_dist};
+            4'd11  : emit_mux = {2'b0, min2_dist};
             default: emit_mux = 8'hFF;
         endcase
     end

@@ -1,4 +1,6 @@
-// fsm: 0=FETCH 1=SCAN 2=WAIT 3=HALT
+// fsm: 0=FETCH 1=SCAN 2=WAIT 3=HALT 4=LD
+// LDQ/LDA/LDM take two cycles: the fetch cycle issues the synchronous RF read of row fA and holds the PC; the LD cycle
+// (instr still shows the LDx word) writes Q/A/MASK from the read data and advances the PC.
 module ctrl (
     clk      : input  'p clock          ,
     clk_n    : input  'p clock_negedge  ,
@@ -51,7 +53,6 @@ module ctrl (
     var pc_r      : 'p logic<5>;
     var scan_row_r: 'p logic<4>;
     var scan_end_r: 'p logic<4>;
-    var dreg_r    : 'p logic<32>;
 
     var opc: 'p logic<4>;
     var fA : 'p logic<4>;
@@ -66,15 +67,18 @@ module ctrl (
     var in_scan : 'p logic;
     var in_wait : 'p logic;
     var in_halt : 'p logic;
+    var in_ld   : 'p logic;
     assign in_fetch = ~(fsm[2] | fsm[1] | fsm[0]);
     assign in_scan  = ~(fsm[2] | fsm[1]) & fsm[0];
     assign in_wait  =  ~fsm[2] & fsm[1] & ~fsm[0];
     assign in_halt  =  ~fsm[2] & fsm[1] &  fsm[0];
+    assign in_ld    =   fsm[2] & ~fsm[1] & ~fsm[0];
 
     var is_scan    : 'p logic;
-    var is_ldq     : 'p logic;
-    var is_lda     : 'p logic;
-    var is_ldm     : 'p logic;
+    var ld_issue   : 'p logic;
+    var ld_q       : 'p logic;
+    var ld_a       : 'p logic;
+    var ld_m       : 'p logic;
     var is_sta     : 'p logic;
     var is_emit    : 'p logic;
     var is_waitbyte: 'p logic;
@@ -82,9 +86,10 @@ module ctrl (
     var is_halt    : 'p logic;
     var is_clrmsk  : 'p logic;
     assign is_scan     = in_fetch & (opc == 4'd4);
-    assign is_ldq      = in_fetch & (opc == 4'd0);
-    assign is_lda      = in_fetch & (opc == 4'd1);
-    assign is_ldm      = in_fetch & (opc == 4'd2);
+    assign ld_issue    = in_fetch & ((opc == 4'd0) | (opc == 4'd1) | (opc == 4'd2));
+    assign ld_q        = in_ld & (opc == 4'd0);
+    assign ld_a        = in_ld & (opc == 4'd1);
+    assign ld_m        = in_ld & (opc == 4'd2);
     assign is_sta      = in_fetch & (opc == 4'd3);
     assign is_emit     = in_fetch & (opc == 4'd6);
     assign is_waitbyte = in_fetch & (opc == 4'd5);
@@ -105,9 +110,9 @@ module ctrl (
 
     var sram_rd_en : 'p logic;
     var sram_addr_v: 'p logic<4>;
-    assign sram_rd_en = is_scan | (in_scan & ~scan_last);
+    assign sram_rd_en = is_scan | ld_issue | (in_scan & ~scan_last);
     always_comb {
-        if is_scan             { sram_addr_v = fA; }
+        if is_scan | ld_issue  { sram_addr_v = fA; }
         else                   { sram_addr_v = scan_row_r + 4'd1; }
     }
     always_comb {
@@ -118,9 +123,6 @@ module ctrl (
     assign sram_web    = 1'b1;
     assign sram_din    = 32'd0;
 
-    always_ff (clk) {
-        dreg_r = sram_dout;
-    }
     assign dreg = sram_dout;
 
     assign pc       = pc_r;
@@ -148,14 +150,14 @@ module ctrl (
     assign wb_dst = fA[3:2];
     assign wb_pos = fA[1:0];
 
-    assign q_wr_en  = is_ldq;
-    assign q_wr_dat = dreg_r;
-    assign a_wr_en  = is_lda;
-    assign a_wr_dat = dreg_r;
-    assign m_wr_en  = is_ldm | is_clrmsk;
+    assign q_wr_en  = ld_q;
+    assign q_wr_dat = dreg;
+    assign a_wr_en  = ld_a;
+    assign a_wr_dat = dreg;
+    assign m_wr_en  = ld_m | is_clrmsk;
     always_comb {
         if is_clrmsk { m_wr_dat = 32'hFFFF_FFFF; }
-        else         { m_wr_dat = dreg_r; }
+        else         { m_wr_dat = dreg; }
     }
 
     // BRANCH target = (PC+1 + {fB,fC}) mod 32
@@ -184,7 +186,7 @@ module ctrl (
         if in_fetch {
             if is_halt {
                 pc_nx = pc_r;
-            } else if is_scan {
+            } else if is_scan | ld_issue {
                 pc_nx = pc_r;
             } else if is_waitbyte {
                 if strobe { pc_nx = pc_r + 5'd1; }
@@ -198,6 +200,8 @@ module ctrl (
             if scan_last { pc_nx = pc_r + 5'd1; }
         } else if in_wait {
             if strobe { pc_nx = pc_r + 5'd1; }
+        } else if in_ld {
+            pc_nx = pc_r + 5'd1;
         }
     }
     assign pc_next = pc_nx;
@@ -217,6 +221,8 @@ module ctrl (
                     scan_row_r = fA;
                     scan_end_r = scan_end_clamp;
                     fsm        = 3'd1;
+                } else if ld_issue {
+                    fsm = 3'd4;
                 } else if is_waitbyte {
                     if strobe {
                     } else {
@@ -238,6 +244,8 @@ module ctrl (
                 if strobe {
                     fsm  = 3'd0;
                 }
+            } else if in_ld {
+                fsm = 3'd0;
             }
         }
     }

@@ -41,9 +41,9 @@ module hades_top (
     var d            : 'p logic<6>;
     var exact_hit    : 'p logic;
     var masked_row   : 'p logic<32>;
-    var min_dist     : 'p logic<5>;
+    var min_dist     : 'p logic<6>;
     var min_idx      : 'p logic<4>;
-    var min2_dist    : 'p logic<5>;
+    var min2_dist    : 'p logic<6>;
     var min2_idx     : 'p logic<4>;
     var min_valid    : 'p logic;
     var threshold_hit: 'p logic;
@@ -312,7 +312,7 @@ module hades_top (
     always_comb {
         case emit_src {
             4'd0:    emit_mux = {4'b0, min_idx};
-            4'd1:    emit_mux = {3'b0, min_dist};
+            4'd1:    emit_mux = {2'b0, min_dist};
             4'd2:    emit_mux = a[7:0];
             4'd3:    emit_mux = a[15:8];
             4'd4:    emit_mux = a[23:16];
@@ -322,7 +322,7 @@ module hades_top (
             4'd8:    emit_mux = {3'b0, count_out};
             4'd9:    emit_mux = {6'b0, threshold_hit, min_valid};
             4'd10:   emit_mux = {4'b0, min2_idx};
-            4'd11:   emit_mux = {3'b0, min2_dist};
+            4'd11:   emit_mux = {2'b0, min2_dist};
             default: emit_mux = 8'hFF;
         }
     }

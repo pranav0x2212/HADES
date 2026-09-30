@@ -9,5 +9,5 @@ make sim                            # RTL
 make -B GATES=yes                   # gate level: copy the hardened netlist to gate_level_netlist.v first, set PDK_ROOT
 ```
 
-The tests cover reset and initialisation, the loader, EXECUTE and restart, every SCAN op and EMIT source, WAITBYTE, MASK, STA, all BRANCH conditions and
-15 golden workloads.
+The tests cover reset and initialisation, the loader, EXECUTE and restart, every SCAN op and EMIT source, WAITBYTE, MASK, STA, LDQ/LDA/LDM (2 cycles, hazards),
+the 6-bit `min_dist`/`min2_dist` (popcount/distance 32), all BRANCH conditions and 15 golden workloads.

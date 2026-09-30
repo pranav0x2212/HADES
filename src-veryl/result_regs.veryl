@@ -11,9 +11,9 @@ module result_regs (
     masked_row   : input  'p logic<32>      ,
     row          : input  'p logic<4>       ,
     a_in         : input  'p logic<32>      ,
-    min_dist     : output 'p logic<5>       ,
+    min_dist     : output 'p logic<6>       ,
     min_idx      : output 'p logic<4>       ,
-    min2_dist    : output 'p logic<5>       ,
+    min2_dist    : output 'p logic<6>       ,
     min2_idx     : output 'p logic<4>       ,
     min_valid    : output 'p logic          ,
     threshold_hit: output 'p logic          ,
@@ -22,9 +22,9 @@ module result_regs (
     a_wr2_en     : output 'p logic          ,
     a_wr2_dat    : output 'p logic<32>      ,
 ) {
-    var min_dist_r     : 'p logic<5>;
+    var min_dist_r     : 'p logic<6>;
     var min_idx_r      : 'p logic<4>;
-    var min2_dist_r    : 'p logic<5>;
+    var min2_dist_r    : 'p logic<6>;
     var min2_idx_r     : 'p logic<4>;
     var min_valid_r    : 'p logic;
     var threshold_hit_r: 'p logic;
@@ -57,9 +57,9 @@ module result_regs (
     var lt2      : 'p logic;
     var gt       : 'p logic;
     var thresh_ok: 'p logic;
-    assign lt        = ~d[5] & (d[4:0] <: min_dist_r);
-    assign lt2       = ~d[5] & (d[4:0] <: min2_dist_r);
-    assign gt        = d[5] | (d[4:0] >: min_dist_r);
+    assign lt        = d <: min_dist_r;
+    assign lt2       = d <: min2_dist_r;
+    assign gt        = d >: min_dist_r;
     assign thresh_ok = (|a_in[7:6]) | (a_in[5:0] >= d);
 
     // REDUCE_POP add is a 6-bit late add plus a precomputed (A[31:6] + 1) selected by the carry.
@@ -128,9 +128,9 @@ module result_regs (
 
     always_ff (clk, rst_n) {
         if_reset {
-            min_dist_r      = 5'h1F;
+            min_dist_r      = 6'h3F;
             min_idx_r       = 4'd0;
-            min2_dist_r     = 5'h1F;
+            min2_dist_r     = 6'h3F;
             min2_idx_r      = 4'd0;
             min_valid_r     = 1'b0;
             threshold_hit_r = 1'b0;
@@ -138,20 +138,20 @@ module result_regs (
             count_r         = 5'd0;
         } else {
             if init_min {
-                if init_min_lo { min_dist_r = 5'h1F; } else { min_dist_r = 5'd0; }
+                if init_min_lo { min_dist_r = 6'h3F; } else { min_dist_r = 6'd0; }
                 min_idx_r = 4'd0;
             } else if min_take {
-                min_dist_r = d[4:0];
+                min_dist_r = d;
                 min_idx_r  = row;
             }
             if init_m2 {
-                min2_dist_r = 5'h1F;
+                min2_dist_r = 6'h3F;
                 min2_idx_r  = 4'd0;
             } else if m2_from_min {
                 min2_dist_r = min_dist_r;
                 min2_idx_r  = min_idx_r;
             } else if m2_from_d {
-                min2_dist_r = d[4:0];
+                min2_dist_r = d;
                 min2_idx_r  = row;
             }
             if init_min {

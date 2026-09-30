@@ -11,9 +11,9 @@ module result_regs (
     input  var logic [32-1:0] masked_row   ,
     input  var logic [4-1:0]  row          ,
     input  var logic [32-1:0] a_in         ,
-    output var logic [5-1:0]  min_dist     ,
+    output var logic [6-1:0]  min_dist     ,
     output var logic [4-1:0]  min_idx      ,
-    output var logic [5-1:0]  min2_dist    ,
+    output var logic [6-1:0]  min2_dist    ,
     output var logic [4-1:0]  min2_idx     ,
     output var logic          min_valid    ,
     output var logic          threshold_hit,
@@ -22,9 +22,9 @@ module result_regs (
     output var logic          a_wr2_en     ,
     output var logic [32-1:0] a_wr2_dat
 );
-    logic [5-1:0]  min_dist_r     ;
+    logic [6-1:0]  min_dist_r     ;
     logic [4-1:0]  min_idx_r      ;
-    logic [5-1:0]  min2_dist_r    ;
+    logic [6-1:0]  min2_dist_r    ;
     logic [4-1:0]  min2_idx_r     ;
     logic          min_valid_r    ;
     logic          threshold_hit_r;
@@ -57,9 +57,9 @@ module result_regs (
     logic lt2      ;
     logic gt       ;
     logic thresh_ok;
-    always_comb lt        = ~d[5] & (d[4:0] < min_dist_r);
-    always_comb lt2       = ~d[5] & (d[4:0] < min2_dist_r);
-    always_comb gt        = d[5] | (d[4:0] > min_dist_r);
+    always_comb lt        = d < min_dist_r;
+    always_comb lt2       = d < min2_dist_r;
+    always_comb gt        = d > min_dist_r;
     always_comb thresh_ok = (|a_in[7:6]) | (a_in[5:0] >= d);
 
     // REDUCE_POP add is a 6-bit late add plus a precomputed (A[31:6] + 1) selected by the carry.
@@ -132,9 +132,9 @@ module result_regs (
 
     always_ff @ (posedge clk, negedge rst_n) begin
         if (!rst_n) begin
-            min_dist_r      <= 5'h1F;
+            min_dist_r      <= 6'h3F;
             min_idx_r       <= 4'd0;
-            min2_dist_r     <= 5'h1F;
+            min2_dist_r     <= 6'h3F;
             min2_idx_r      <= 4'd0;
             min_valid_r     <= 1'b0;
             threshold_hit_r <= 1'b0;
@@ -143,23 +143,23 @@ module result_regs (
         end else begin
             if (init_min) begin
                 if (init_min_lo) begin
-                    min_dist_r <= 5'h1F;
+                    min_dist_r <= 6'h3F;
                 end else begin
-                    min_dist_r <= 5'd0;
+                    min_dist_r <= 6'd0;
                 end
                 min_idx_r  <= 4'd0;
             end else if (min_take) begin
-                min_dist_r <= d[4:0];
+                min_dist_r <= d;
                 min_idx_r  <= row;
             end
             if (init_m2) begin
-                min2_dist_r <= 5'h1F;
+                min2_dist_r <= 6'h3F;
                 min2_idx_r  <= 4'd0;
             end else if (m2_from_min) begin
                 min2_dist_r <= min_dist_r;
                 min2_idx_r  <= min_idx_r;
             end else if (m2_from_d) begin
-                min2_dist_r <= d[4:0];
+                min2_dist_r <= d;
                 min2_idx_r  <= row;
             end
             if (init_min) begin

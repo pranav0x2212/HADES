@@ -69,6 +69,15 @@ class Prog:
     def clrmask(self):
         self.word(0x9000)
 
+    def ldq(self, row):
+        self.word(0x0000 | (row << 8), 2)
+
+    def lda(self, row):
+        self.word(0x1000 | (row << 8), 2)
+
+    def ldm(self, row):
+        self.word(0x2000 | (row << 8), 2)
+
     def halt(self):
         self.word(0x8000)
 
@@ -264,13 +273,13 @@ GOLDEN = [
      '266E490DB10000000000000000000000000000000000000000000000',
      '060CFFFF10',
      ''),
-    ('Prog4', False, 87,
-     '5000510052005300580059005A005B0040F268006600670070F38000800080008000800080008000800080008000800080008000800080008000800080008000',
+    ('Prog4', False, 88,
+     '54005000510052005300580059005A005B0040F268006600670070F3800080008000800080008000800080008000800080008000800080008000800080008000',
      '000000000101010102020202030303030404040405050505060606060707070708080808090909090A0A0A0A0B0B0B0B0C0C0C0C0D0D0D0D0E0E0E0E0F0F0F0F',
-     'EFF317F157E1E0970000000000000000000000000000000000000000008C3F5FD5DF3D34F8000000000000000000000000000000000000000000C08262B03750894F000000000000000000000000000000000000000000',
+     '00EFF317F157E1E0970000000000000000000000000000000000000000008C3F5FD5DF3D34F8000000000000000000000000000000000000000000C08262B03750894F000000000000000000000000000000000000000000',
      '000000000000010100',
      ''),
-    ('Prog5', True, 45,
+    ('Prog5', True, 46,
      '5000510052005300540040F27204100040F160006A00690080008000800080008000800080008000800080008000800080008000800080008000800080008000',
      '000000000000000100000002000000030000000400000005000000060000000700000008000000090000000A0000000B0000000C0000000D0000000E0000000F',
      'A5E42428CA00000000000000000000000000000000000000000000000000000000000000000000000000000000',
@@ -282,7 +291,7 @@ GOLDEN = [
      'B869D7590000000000000000000000000000000000000068000000000000000000000000000000000000000000',
      '1110FFFF',
      ''),
-    ('Prog7', True, 81,
+    ('Prog7', True, 82,
      '40F440F540F66200630064006500300040F462006300100062006300640065008000800080008000800080008000800080008000800080008000800080008000',
      'FF00FF00EE11EE11DD22DD22CC33CC33BB44BB44AA55AA559966996688778877778877886699669955AA55AA44BB44BB33CC33CC22DD22DD11EE11EE00FF00FF',
      '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
@@ -292,7 +301,7 @@ GOLDEN = [
      '900060006100680069006A006B0060006100680069006A006B0060006100680069006A006B0060006100680069006A006B0060006100680069006A006B008000',
      '00000000111111112222222233333333444444445555555566666666777777778888888899999999AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF',
      '0000000000000000000000000000000000000000000000000000000000000000',
-     '001F0000001F001F0000001F001F0000001F001F0000001F001F0000001F',
+     '003F0000003F003F0000003F003F0000003F003F0000003F003F0000003F',
      ''),
     ('Odd9', True, 25,
      '500051005200530040F160006A006B00800080008000800080008000800080008000800080008000800080008000800080008000800080008000800080008000',
@@ -362,7 +371,7 @@ async def test_no_run_before_execute_then_halt(dut):
     assert not h.emits and h.pins()["halt"] == 0, "a loaded program must not run before EXECUTE"
     await h.execute_request()
     await h.run_schedule(p.sched)
-    assert h.emits == [0x1F], f"expected one EMIT of min_dist reset value, got {h.emits}"
+    assert h.emits == [0x3F], f"expected one EMIT of min_dist reset value, got {h.emits}"
     assert h.pins()["halt"] == 1
 
 
@@ -448,7 +457,7 @@ async def test_execute_ignored_with_pending_byte(dut):
     await h.load_byte(p.words[2] & 0xFF)
     await h.execute_request()
     await h.run_schedule(p.sched)
-    assert h.emits == [0x1F, 0x1F] and h.pins()["halt"] == 1
+    assert h.emits == [0x3F, 0x3F] and h.pins()["halt"] == 1
 
 
 @cocotb.test()
@@ -503,7 +512,7 @@ async def test_reset_and_initialisation(dut):
     p.emit(E_DIST)
     p.halt()
     await h.run(p)
-    f.chk(h.emits == [0x1F] and h.pins()["halt"] == 1, "a fresh EXECUTE edge after the hold must start the program")
+    f.chk(h.emits == [0x3F] and h.pins()["halt"] == 1, "a fresh EXECUTE edge after the hold must start the program")
     f.done()
 
 
@@ -522,19 +531,19 @@ async def test_loader(dut):
     p.emit(E_DIST)
     p.halt()
     assert len(p.words) == 32
-    await check_prog(h, f, "32 slots, two per word", p, exp + [0x1F])
+    await check_prog(h, f, "32 slots, two per word", p, exp + [0x3F])
 
     p = Prog()
     for s in (E_DIST, E_IDX, E_DIST2, E_FLG, E_DIST):
         p.emit(s)
-    await check_prog(h, f, "odd instruction count (lone even slot)", p, [0x1F, 0, 0x1F, 0, 0x1F])
+    await check_prog(h, f, "odd instruction count (lone even slot)", p, [0x3F, 0, 0x3F, 0, 0x3F])
 
     await h.fresh()
     words = [0x6100] * 31 + [0x8000]
     await h.load(words + [0x6000, 0x6000])
     await h.execute_request()
     await h.run_schedule([], until_halt=100)
-    f.chk(h.emits == [0, 0] + [0x1F] * 29, f"slot counter wrap: EMIT {h.emits}")
+    f.chk(h.emits == [0, 0] + [0x3F] * 29, f"slot counter wrap: EMIT {h.emits}")
 
     await h.fresh()
     for b, hold in ((0x61, 10), (0x00, 10), (0x60, 3), (0x00, 3)):
@@ -542,7 +551,7 @@ async def test_loader(dut):
         await h.clocks(2)
     await h.execute_request()
     await h.run_schedule([], until_halt=50)
-    f.chk(h.emits == [0x1F, 0] and h.pins()["halt"] == 1, f"LD_STROBE must be edge sensitive: EMIT {h.emits}")
+    f.chk(h.emits == [0x3F, 0] and h.pins()["halt"] == 1, f"LD_STROBE must be edge sensitive: EMIT {h.emits}")
 
     await h.fresh()
     dut.ui_in.value = 0x61
@@ -590,9 +599,9 @@ async def test_execute_and_restart(dut):
     p.halt()
     await h.fresh()
     await h.run(p, until_halt=300)
-    f.chk(h.emits == [0, 0x1F] and h.pins()["halt"] == 1, f"first run: EMIT {h.emits}")
+    f.chk(h.emits == [0, 0x3F] and h.pins()["halt"] == 1, f"first run: EMIT {h.emits}")
     await h.rerun(p, until_halt=300)
-    f.chk(h.emits == [0, 0x1F, 5, 0], f"restart must keep the previous run's results: EMIT {h.emits}")
+    f.chk(h.emits == [0, 0x3F, 5, 0], f"restart must keep the previous run's results: EMIT {h.emits}")
 
     p = Prog()
     p.emit(E_DIST)
@@ -604,12 +613,12 @@ async def test_execute_and_restart(dut):
     await h.execute_request()
     await h.run_schedule([(0, 0)] * 8, tail=0)
     pins = h.pins()
-    f.chk(pins["busy"] == 1 and pins["halt"] == 0 and h.emits == [0x1F], "stalled on WAITBYTE while running")
+    f.chk(pins["busy"] == 1 and pins["halt"] == 0 and h.emits == [0x3F], "stalled on WAITBYTE while running")
     await h.execute_request()
     await h.run_schedule([(0, 0)] * 6, tail=0)
-    f.chk(h.emits == [0x1F, 0x1F] and h.pins()["halt"] == 0, f"EXECUTE while running must restart at slot 0: EMIT {h.emits}")
+    f.chk(h.emits == [0x3F, 0x3F] and h.pins()["halt"] == 0, f"EXECUTE while running must restart at slot 0: EMIT {h.emits}")
     await h.run_schedule([(5, 1), (0, 1), (0, 1)])
-    f.chk(h.emits == [0x1F, 0x1F, 0] and h.pins()["halt"] == 1, f"restarted run completes: EMIT {h.emits}")
+    f.chk(h.emits == [0x3F, 0x3F, 0] and h.pins()["halt"] == 1, f"restarted run completes: EMIT {h.emits}")
 
     p = Prog()
     p.emit(E_DIST)
@@ -664,7 +673,7 @@ async def test_scan_operations(dut):
         p.emit(s)
     p.halt()
     await check_prog(h, f, "all EMIT sources", p,
-                     [5, 0, 4, 0xB1, 0xB2, 0xB3, 0xB2, 0x20, 5, 3, 0, 0x1F, 0xFF])
+                     [5, 0, 4, 0xB1, 0xB2, 0xB3, 0xB2, 0x20, 5, 3, 0, 0x3F, 0xFF])
 
     cycles = []
     for n in (1, 16):
@@ -766,32 +775,32 @@ async def test_branches(dut):
         return p
 
     p = Prog(); p.branch(C_ALWAYS, 1); p.emit(E_IDX); p.emit(E_DIST); p.halt()
-    await check_prog(h, f, "ALWAYS forward", p, [0x1F])
+    await check_prog(h, f, "ALWAYS forward", p, [0x3F])
     p = q5(); p.scan(5, 1, EXACT); p.branch(C_MATNZ, 1); p.branch(C_ALWAYS, 0xFD); p.emit(E_IDX); p.halt()
     await check_prog(h, f, "MATCH_NZ", p, [0])
     p = q5(); p.wb(1, 0, 4); p.scan(0, 16, THR); p.branch(C_THR, 1); p.emit(E_DIST2); p.emit(E_IDX); p.halt()
     await check_prog(h, f, "THRESHOLD_HIT", p, [5])
     p = Prog(); p.branch(C_NTHR, 1); p.emit(E_IDX); p.emit(E_DIST); p.halt()
-    await check_prog(h, f, "NOT_THRESHOLD_HIT", p, [0x1F])
+    await check_prog(h, f, "NOT_THRESHOLD_HIT", p, [0x3F])
     p = q5(); p.branch(C_MINV, 2); p.scan(5, 1, HAM); p.branch(C_MINV, 1); p.emit(E_DIST2); p.emit(E_IDX); p.halt()
     await check_prog(h, f, "MIN_VALID", p, [5])
     p = q5(); p.scan(0, 1, EXACT); p.branch(C_CNTNZ, 2); p.scan(5, 1, EXACT, acc=1); p.branch(C_CNTNZ, 1)
     p.emit(E_DIST); p.emit(E_CNT); p.halt()
     await check_prog(h, f, "COUNT_NZ", p, [1])
     p = Prog(); p.loada(0, 0, 0, 0); p.branch(C_AZ, 1); p.emit(E_IDX); p.branch(C_ANZ, 1); p.emit(E_DIST); p.halt()
-    await check_prog(h, f, "A_ZERO / A_NONZERO with A=0", p, [0x1F])
+    await check_prog(h, f, "A_ZERO / A_NONZERO with A=0", p, [0x3F])
     p = Prog(); p.loada(0xEF, 0xBE, 0xAD, 0xDE); p.branch(C_ANZ, 1); p.emit(E_IDX); p.emit(E_DIST)
     for s in (E_A0, E_A1, E_A2, E_A3):
         p.emit(s)
     p.halt()
-    await check_prog(h, f, "A_NONZERO taken", p, [0x1F, 0xEF, 0xBE, 0xAD, 0xDE])
+    await check_prog(h, f, "A_NONZERO taken", p, [0x3F, 0xEF, 0xBE, 0xAD, 0xDE])
     p = q5(); p.scan(5, 1, HAM); p.branch(C_MINV, 1); p.branch(C_ALWAYS, 0xFD); p.emit(E_DIST); p.halt()
     await check_prog(h, f, "backward offset not taken", p, [0])
 
     p = Prog()
     p.loadq(1); p.scan(5, 1, EXACT); p.emit(E_CNT); p.branch(C_CNTNZ, 1); p.branch(C_ALWAYS, 0xF8); p.emit(E_DIST); p.halt()
     p.sched = ([(1, 1)] * 4 + [(0, 1)] * 5 + [(5, 1)] * 4 + [(0, 1)] * 6)
-    await check_prog(h, f, "WAITBYTE loop with backward BRANCH", p, [0, 1, 0x1F])
+    await check_prog(h, f, "WAITBYTE loop with backward BRANCH", p, [0, 1, 0x3F])
     f.done()
 
 
@@ -825,57 +834,98 @@ async def test_golden_workloads(dut):
     f.done()
 
 
-@cocotb.test(expect_fail=True)
-async def test_golden_prog4_known_mismatch(dut):
+@cocotb.test()
+async def test_golden_prog4(dut):
     h = Host(dut)
     f = Fails()
     await run_golden(h, f, [g for g in GOLDEN if g[0] == "Prog4"][0])
     f.done()
 
 
-@cocotb.test(expect_fail=True)
-async def test_known_limitation_ldq(dut):
+@cocotb.test()
+async def test_ldq(dut):
     h = Host(dut)
-    p = Prog(); p.word(0x0500); p.scan(5, 1, EXACT); p.emit(E_CNT); p.halt()
+    p = Prog(); p.ldq(5); p.scan(5, 1, EXACT); p.emit(E_CNT); p.halt()
     await h.fresh()
     await h.run(p, until_halt=60)
     assert h.emits == [1], f"LDQ 5 should load data row 5, got {h.emits}"
 
 
-@cocotb.test(expect_fail=True)
-async def test_known_limitation_lda(dut):
+@cocotb.test()
+async def test_lda(dut):
     h = Host(dut)
-    p = Prog(); p.word(0x1600); p.emit(E_A0); p.halt()
+    p = Prog(); p.lda(6); p.emit(E_A0); p.halt()
     await h.fresh()
     await h.run(p, until_halt=60)
     assert h.emits == [6], f"LDA 6 should load data row 6, got {h.emits}"
 
 
-@cocotb.test(expect_fail=True)
-async def test_known_limitation_ldm(dut):
+@cocotb.test()
+async def test_ldm(dut):
     h = Host(dut)
-    p = Prog(); p.word(0x2700); p.scan(15, 1, ROR); p.emit(E_A0); p.halt()
+    p = Prog(); p.ldm(7); p.scan(15, 1, ROR); p.emit(E_A0); p.halt()
     await h.fresh(rows_with(r15=ALL_ONES))
     await h.run(p, until_halt=60)
     assert h.emits == [7], f"LDM 7 should load data row 7, got {h.emits}"
 
 
-async def maxpop32(dut):
+@cocotb.test()
+async def test_ldx_takes_two_cycles(dut):
     h = Host(dut)
-    p = Prog(); p.scan(0, 4, RMAXPOP); p.emit(E_IDX); p.emit(E_DIST); p.halt()
-    await h.fresh([1] * 3 + [ALL_ONES] + [1] * 12)
-    await h.run(p, until_halt=100)
+    p = Prog(); p.ldq(5); p.lda(6); p.ldm(7); p.halt()
+    await h.fresh()
+    await h.run(p, until_halt=60)
+    assert h.halt_cycle == 3 * 2 + 1 + HALT_LATENCY, f"3 LDx + HALT: halt at cycle {h.halt_cycle}"
+
+
+@cocotb.test()
+async def test_ldx_hazards(dut):
+    h = Host(dut)
+    f = Fails()
+    rows = rows_with(r2=0x0000FFFF, r9=0, r15=0x0F0F0F0F)
+    # STA then LDA of the same row, back to back; the next instruction sees the new A
+    p = Prog(); p.wb32(1, 0x44332211); p.sta(3); p.lda(0); p.lda(3); p.emit(E_A0); p.emit(E_A3); p.halt()
+    await check_prog(h, f, "STA then LDA same row", p, [0x11, 0x44], rows=rows)
+    # LDA then BRANCH on A, LDM then SCAN using the new MASK, LDQ then SCAN using the new Q
+    p = Prog(); p.lda(9); p.branch(C_AZ, 1); p.emit(E_IDX); p.lda(2); p.branch(C_ANZ, 1); p.emit(E_IDX)
+    p.ldm(2); p.ldq(15); p.scan(0, 16, HAM); p.emit(E_DIST); p.halt()
+    await check_prog(h, f, "LDA/BRANCH and LDM/LDQ then SCAN", p, [0], rows=rows)
+    # LDQ row 15 then EXACT scan matches only row 15
+    p = Prog(); p.ldq(15); p.scan(0, 16, EXACT); p.emit(E_CNT); p.emit(E_MHI); p.halt()
+    await check_prog(h, f, "LDQ row 15 then EXACT", p, [1, 0x80], rows=rows)
+    # LDx in a WAITBYTE stream: the extra cycle must not misalign a following WAITBYTE
+    p = Prog(); p.ldq(5); p.wb(0, 0, 0x06); p.scan(0, 16, EXACT); p.emit(E_CNT); p.emit(E_MLO); p.halt()
+    await check_prog(h, f, "LDQ then WAITBYTE patches Q byte 0", p, [0, 0x00], rows=rows)
+    f.done()
+    h.rows_state = None
+
+
+async def maxpop32(dut, rows):
+    h = Host(dut)
+    p = Prog(); p.scan(0, 16, RMAXPOP); p.emit(E_IDX); p.emit(E_DIST); p.halt()
+    await h.fresh(rows)
+    await h.run(p, until_halt=120)
     h.rows_state = None
     return h
 
 
 @cocotb.test()
-async def test_maxpop_index_with_popcount_32(dut):
-    h = await maxpop32(dut)
-    assert h.emits[0] == 3 and h.pins()["halt"] == 1, f"got {h.emits}"
+async def test_maxpop_popcount_32(dut):
+    h = await maxpop32(dut, [1] * 3 + [ALL_ONES] + [1] * 12)
+    assert h.emits == [3, 32] and h.pins()["halt"] == 1, f"got {h.emits}"
 
 
-@cocotb.test(expect_fail=True)
-async def test_known_limitation_min_dist_is_5_bits(dut):
-    h = await maxpop32(dut)
-    assert h.emits[1] == 32, f"MAXPOP value should be 32, got {h.emits}"
+@cocotb.test()
+async def test_maxpop_32_not_overridden_by_later_rows(dut):
+    h = await maxpop32(dut, [ALL_ONES] + [1] * 15)
+    assert h.emits == [0, 32] and h.pins()["halt"] == 1, f"got {h.emits}"
+
+
+@cocotb.test()
+async def test_hamming_selects_distance_32(dut):
+    h = Host(dut)
+    p = Prog(); p.loadq(0); p.scan(0, 16, HAM); p.emit(E_IDX); p.emit(E_DIST); p.halt()
+    await h.fresh([ALL_ONES] * 16)
+    await h.run(p, until_halt=200)
+    h.rows_state = None
+    assert h.emits == [0, 32] and h.pins()["halt"] == 1, f"got {h.emits}"
