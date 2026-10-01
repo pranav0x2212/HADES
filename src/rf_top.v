@@ -1,9 +1,5 @@
-/**
- * 32x32 register file with 2 read ports and 1 write port.
- */
 
 module rf_top (
-    // Power pins for the Gate Level test:
 `ifdef GL_TEST
     inout wire VDPWR,
     inout wire VGND,
@@ -38,5 +34,4 @@ module rf_top (
     else rb_data <= storage[rb_addr];
   end
 
-
-endmodule  /* rf_top */
+endmodule

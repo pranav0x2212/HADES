@@ -13,6 +13,13 @@ HADES v1 is a masked Hamming-distance nearest-neighbour / threshold / reduction 
 
 A reset erases the program. Loading a program while it is executing is not supported.
 
+### Instruction notes
+- `LDQ row` / `LDA row` / `LDM row` load Q / A / MASK from data row `row` (0-15) and take **2 cycles** each; the next instruction sees the new value.
+  `STA row` followed by `LDx row` therefore moves A into Q or MASK on-chip.
+- `WAITBYTE` is the other way to set Q / A / MASK (one byte lane per instruction). A and Q are undefined after reset; a program that uses `SCAN THRESHOLD`
+  must set A[7:0] (the threshold) first.
+- `min_dist` and `min2_dist` are 6 bits (0-32); their reset/identity value is `0x3F`, which EMIT returns as `0x3F` if no row has been recorded.
+
 ### Pins
 | Pin | Direction | Function |
 |---|---|---|

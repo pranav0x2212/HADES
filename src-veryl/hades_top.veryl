@@ -1,10 +1,3 @@
-// TT26 pin assignment:
-//   uo_out[7:0]  = EMIT data (registered; valid when uio_out[0]=READY)
-//   uio_out[0]   = READY   (DUT -> host: byte on uo_out is valid)
-//   uio_out[1]   = BUSY    (DUT -> host: executing)
-//   uio_out[2]   = HALT    (DUT -> host: halted)
-//   uio_in[3]    = STROBE  (host -> DUT: ui_in[7:0] is valid for WAITBYTE)
-//   uio_oe       = 8'b0000_0111  (bits 0-2 output; bit 3 input for STROBE)
 module hades_top (
     clk       : input  'p clock          ,
     clk_n     : input  'p clock_negedge  ,
@@ -14,7 +7,6 @@ module hades_top (
     uo_out    : output 'p logic<8>       ,
     uio_out   : output 'p logic<8>       ,
     uio_oe    : output 'p logic<8>       ,
-    // rf_top macro (32x32, 2R1W, 1-cycle sync read): words 0-15 = data rows, words 16-31 = packed program
     rf_w_data : output 'p logic<32>      ,
     rf_w_addr : output 'p logic<5>       ,
     rf_w_ena  : output 'p logic          ,
@@ -34,16 +26,22 @@ module hades_top (
     var scan_row     : 'p logic<4>;
     var scan_op      : 'p logic<3>;
     var use_xor      : 'p logic<4>;
+    var use_xor2     : 'p logic<4>;
     var dreg         : 'p logic<32>;
     var q            : 'p logic<32>;
     var a            : 'p logic<32>;
     var mask         : 'p logic<32>;
     var d            : 'p logic<6>;
     var exact_hit    : 'p logic;
+    var pair2        : 'p logic;
+    var ra_sel       : 'p logic;
+    var ra_row       : 'p logic<4>;
+    var exact_hit2   : 'p logic;
+    var masked_row2  : 'p logic<32>;
     var masked_row   : 'p logic<32>;
-    var min_dist     : 'p logic<5>;
+    var min_dist     : 'p logic<6>;
     var min_idx      : 'p logic<4>;
-    var min2_dist    : 'p logic<5>;
+    var min2_dist    : 'p logic<6>;
     var min2_idx     : 'p logic<4>;
     var min_valid    : 'p logic;
     var threshold_hit: 'p logic;
@@ -85,13 +83,10 @@ module hades_top (
     var pc_next      : 'p logic<5>;
     var sta_en       : 'p logic;
 
-    // Post-reset sweep HALT-fills program words 16-31 (data rows 0-15 are retained through reset).
     var sw       : 'p logic<4>;
     var init_done: 'p logic;
     var lo_buf   : 'p logic<16>;
     var instr_raw: 'p logic<16>;
-    // run=0: ctrl held in reset and HALT is presented. An accepted exec_req (only after init_done) restarts
-    // ctrl at PC 0; Q/A/MASK/result registers keep their values.
     var run      : 'p logic;
     var go       : 'p logic;
     let rst_n_c  : 'p reset_async_low = rst_n & run;
@@ -119,12 +114,10 @@ module hades_top (
         }
     }
 
-    // Program load: even slot -> {HALT, data} and buffer the low half; odd slot -> {data, buffered low}.
     always_ff (clk) {
         if pm_wr_en & ~pm_wr_addr[0] { lo_buf = pm_wr_data; }
     }
 
-    // Single write port; priority: post-reset sweep > program load > STA.
     always_comb {
         if ~init_done {
             rf_w_ena  = 1'b1;
@@ -142,15 +135,15 @@ module hades_top (
         }
     }
 
-    // Fetch: RF read-A samples the NEXT pc; pc[0] picks the instruction half (no fetch bubble).
-    assign rf_ra_addr = {1'b1, pc_next[4:1]};
+    always_comb {
+        if ra_sel { rf_ra_addr = {1'b0, ra_row}; }
+        else      { rf_ra_addr = {1'b1, pc_next[4:1]}; }
+    }
     assign rf_rb_addr = {1'b0, sram_addr};
     always_comb {
         if pc[0] { instr_raw = rf_ra_data[31:16]; }
         else     { instr_raw = rf_ra_data[15:0]; }
     }
-    // Until execution is requested (and during the post-reset sweep) present the HALT opcode: the fetched word may be
-    // undefined, and the idle ctrl (held in reset, FSM=fetch) must not decode/act on program slot 0.
     always_comb {
         if run { instr = instr_raw; }
         else         { instr = {4'h8, instr_raw[11:0]}; }
@@ -181,8 +174,13 @@ module hades_top (
         rst_init         ,
         upd_en           ,
         scan_row         ,
+        pair2            ,
+        ra_sel           ,
+        ra_row           ,
+        match            ,
         scan_op          ,
         use_xor_o : use_xor ,
+        use_xor2_o : use_xor2 ,
         sram_addr        ,
         sram_csb         ,
         sram_web         ,
@@ -246,7 +244,6 @@ module hades_top (
         }
     }
 
-    // MASK is written per byte lane (WAITBYTE lane k, or LDM/CLRMASK on all lanes).
     var m_hit: 'p logic<4>;
     always_comb {
         for k in 0..4 {
@@ -285,6 +282,14 @@ module hades_top (
         masked_row             ,
     );
 
+    always_comb {
+        for k in 0..4 {
+            if use_xor2[k] { masked_row2[8*k+:8] = (rf_ra_data[8*k+:8] ^ q[8*k+:8]) & mask[8*k+:8]; }
+            else          { masked_row2[8*k+:8] = rf_ra_data[8*k+:8] & mask[8*k+:8]; }
+        }
+    }
+    assign exact_hit2 = ~|masked_row2;
+
     inst u_result_regs: result_regs (
         clk              ,
         rst_n            ,
@@ -294,6 +299,9 @@ module hades_top (
         d                ,
         exact_hit        ,
         masked_row       ,
+        pair2            ,
+        exact_hit2       ,
+        masked_row2      ,
         row     : scan_row ,
         a_in    : a        ,
         min_dist         ,
@@ -312,7 +320,7 @@ module hades_top (
     always_comb {
         case emit_src {
             4'd0:    emit_mux = {4'b0, min_idx};
-            4'd1:    emit_mux = {3'b0, min_dist};
+            4'd1:    emit_mux = {2'b0, min_dist};
             4'd2:    emit_mux = a[7:0];
             4'd3:    emit_mux = a[15:8];
             4'd4:    emit_mux = a[23:16];
@@ -322,7 +330,7 @@ module hades_top (
             4'd8:    emit_mux = {3'b0, count_out};
             4'd9:    emit_mux = {6'b0, threshold_hit, min_valid};
             4'd10:   emit_mux = {4'b0, min2_idx};
-            4'd11:   emit_mux = {3'b0, min2_dist};
+            4'd11:   emit_mux = {2'b0, min2_dist};
             default: emit_mux = 8'hFF;
         }
     }

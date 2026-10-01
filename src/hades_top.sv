@@ -1,20 +1,12 @@
-// TT26 pin assignment:
-//   uo_out[7:0]  = EMIT data (registered; valid when uio_out[0]=READY)
-//   uio_out[0]   = READY   (DUT -> host: byte on uo_out is valid)
-//   uio_out[1]   = BUSY    (DUT -> host: executing)
-//   uio_out[2]   = HALT    (DUT -> host: halted)
-//   uio_in[3]    = STROBE  (host -> DUT: ui_in[7:0] is valid for WAITBYTE)
-//   uio_oe       = 8'b0000_0111  (bits 0-2 output; bit 3 input for STROBE)
 module hades_top (
-    input  var logic         clk    ,
-    input  var logic         clk_n  ,
-    input  var logic         rst_n  ,
-    input  var logic [8-1:0] ui_in  ,
-    input  var logic [8-1:0] uio_in ,
-    output var logic [8-1:0] uo_out ,
-    output var logic [8-1:0] uio_out,
-    output var logic [8-1:0] uio_oe ,
-
+    input  var logic          clk       ,
+    input  var logic          clk_n     ,
+    input  var logic          rst_n     ,
+    input  var logic [8-1:0]  ui_in     ,
+    input  var logic [8-1:0]  uio_in    ,
+    output var logic [8-1:0]  uo_out    ,
+    output var logic [8-1:0]  uio_out   ,
+    output var logic [8-1:0]  uio_oe    ,
     output var logic [32-1:0] rf_w_data ,
     output var logic [5-1:0]  rf_w_addr ,
     output var logic          rf_w_ena  ,
@@ -34,16 +26,22 @@ module hades_top (
     logic [4-1:0]  scan_row        ;
     logic [3-1:0]  scan_op         ;
     logic [4-1:0]  use_xor         ;
+    logic [4-1:0]  use_xor2        ;
     logic [32-1:0] dreg            ;
     logic [32-1:0] q               ;
     logic [32-1:0] a               ;
     logic [32-1:0] mask            ;
     logic [6-1:0]  d               ;
     logic          exact_hit       ;
+    logic          pair2           ;
+    logic          ra_sel          ;
+    logic [4-1:0]  ra_row          ;
+    logic          exact_hit2      ;
+    logic [32-1:0] masked_row2     ;
     logic [32-1:0] masked_row      ;
-    logic [5-1:0]  min_dist        ;
+    logic [6-1:0]  min_dist        ;
     logic [4-1:0]  min_idx         ;
-    logic [5-1:0]  min2_dist       ;
+    logic [6-1:0]  min2_dist       ;
     logic [4-1:0]  min2_idx        ;
     logic          min_valid       ;
     logic          threshold_hit   ;
@@ -89,9 +87,9 @@ module hades_top (
     logic          init_done;
     logic [16-1:0] lo_buf   ;
     logic [16-1:0] instr_raw;
-    logic run    ;
-    logic go     ;
-    logic rst_n_c; always_comb rst_n_c = rst_n & run;
+    logic          run      ;
+    logic          go       ;
+    logic          rst_n_c  ; always_comb rst_n_c   = rst_n & run;
 
     always_ff @ (posedge clk, negedge rst_n) begin
         if (!rst_n) begin
@@ -146,7 +144,13 @@ module hades_top (
         end
     end
 
-    always_comb rf_ra_addr = {1'b1, pc_next[4:1]};
+    always_comb begin
+        if (ra_sel) begin
+            rf_ra_addr = {1'b0, ra_row};
+        end else begin
+            rf_ra_addr = {1'b1, pc_next[4:1]};
+        end
+    end
     always_comb rf_rb_addr = {1'b0, sram_addr};
     always_comb begin
         if (pc[0]) begin
@@ -155,7 +159,6 @@ module hades_top (
             instr_raw = rf_ra_data[15:0];
         end
     end
-
     always_comb begin
         if (run) begin
             instr = instr_raw;
@@ -201,8 +204,13 @@ module hades_top (
         .rst_init         (rst_init        ),
         .upd_en           (upd_en          ),
         .scan_row         (scan_row        ),
+        .pair2            (pair2           ),
+        .ra_sel           (ra_sel          ),
+        .ra_row           (ra_row          ),
+        .match            (match           ),
         .scan_op          (scan_op         ),
         .use_xor_o        (use_xor         ),
+        .use_xor2_o       (use_xor2        ),
         .sram_addr        (sram_addr       ),
         .sram_csb         (sram_csb        ),
         .sram_web         (sram_web        ),
@@ -310,6 +318,17 @@ module hades_top (
         .masked_row (masked_row)
     );
 
+    always_comb begin
+        for (int k = 0; k < 4; k++) begin
+            if (use_xor2[k]) begin
+                masked_row2[8 * k+:8] = (rf_ra_data[8 * k+:8] ^ q[8 * k+:8]) & mask[8 * k+:8];
+            end else begin
+                masked_row2[8 * k+:8] = rf_ra_data[8 * k+:8] & mask[8 * k+:8];
+            end
+        end
+    end
+    always_comb exact_hit2 = ~|masked_row2;
+
     result_regs u_result_regs (
         .clk           (clk          ),
         .rst_n         (rst_n        ),
@@ -319,6 +338,9 @@ module hades_top (
         .d             (d            ),
         .exact_hit     (exact_hit    ),
         .masked_row    (masked_row   ),
+        .pair2         (pair2        ),
+        .exact_hit2    (exact_hit2   ),
+        .masked_row2   (masked_row2  ),
         .row           (scan_row     ),
         .a_in          (a            ),
         .min_dist      (min_dist     ),
@@ -337,7 +359,7 @@ module hades_top (
     always_comb begin
         case (emit_src)
             4'd0   : emit_mux = {4'b0, min_idx};
-            4'd1   : emit_mux = {3'b0, min_dist};
+            4'd1   : emit_mux = {2'b0, min_dist};
             4'd2   : emit_mux = a[7:0];
             4'd3   : emit_mux = a[15:8];
             4'd4   : emit_mux = a[23:16];
@@ -347,7 +369,7 @@ module hades_top (
             4'd8   : emit_mux = {3'b0, count_out};
             4'd9   : emit_mux = {6'b0, threshold_hit, min_valid};
             4'd10  : emit_mux = {4'b0, min2_idx};
-            4'd11  : emit_mux = {3'b0, min2_dist};
+            4'd11  : emit_mux = {2'b0, min2_dist};
             default: emit_mux = 8'hFF;
         endcase
     end
@@ -371,4 +393,3 @@ module hades_top (
     always_comb uio_out = {5'b0, halted, busy, ready_r};
     always_comb uio_oe  = 8'b0000_0111;
 endmodule
-//# sourceMappingURL=hades_top.sv.map

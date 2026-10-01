@@ -9,7 +9,7 @@ and OR/AND/popcount reductions over the rows and streams the results back over a
 
 See [docs/info.md](docs/info.md) for how to use it.
 
-Rows are written by a program (4 `WAITBYTE` + `STA row`). Known limitation: `LDQ`/`LDA`/`LDM` are not implemented (the row operand is ignored), so Q/A/MASK can only be set via `WAITBYTE`.
+Rows are written by a program (4 `WAITBYTE` + `STA row`). `LDQ`/`LDA`/`LDM row` load Q / A / MASK from a data row on-chip (2 cycles each), so a query, threshold or mask can be taken from stored data or from a previous scan result (`STA` then `LDx`) without the host resending it. `min_dist`/`min2_dist` are 6 bits (a distance or popcount of 32 is representable) with identity `0x3F`.
 
 The RTL is written in [Veryl](https://veryl-lang.org) (`src-veryl/`). Run `veryl build` after editing it: the generated `src/*.sv` is committed and CI does not run Veryl.
 
