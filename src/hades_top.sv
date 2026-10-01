@@ -1,20 +1,12 @@
-// TT26 pin assignment:
-//   uo_out[7:0]  = EMIT data (registered; valid when uio_out[0]=READY)
-//   uio_out[0]   = READY   (DUT -> host: byte on uo_out is valid)
-//   uio_out[1]   = BUSY    (DUT -> host: executing)
-//   uio_out[2]   = HALT    (DUT -> host: halted)
-//   uio_in[3]    = STROBE  (host -> DUT: ui_in[7:0] is valid for WAITBYTE)
-//   uio_oe       = 8'b0000_0111  (bits 0-2 output; bit 3 input for STROBE)
 module hades_top (
-    input  var logic         clk    ,
-    input  var logic         clk_n  ,
-    input  var logic         rst_n  ,
-    input  var logic [8-1:0] ui_in  ,
-    input  var logic [8-1:0] uio_in ,
-    output var logic [8-1:0] uo_out ,
-    output var logic [8-1:0] uio_out,
-    output var logic [8-1:0] uio_oe ,
-    // rf_top macro (32x32, 2R1W, 1-cycle sync read): words 0-15 = data rows, words 16-31 = packed program
+    input  var logic          clk       ,
+    input  var logic          clk_n     ,
+    input  var logic          rst_n     ,
+    input  var logic [8-1:0]  ui_in     ,
+    input  var logic [8-1:0]  uio_in    ,
+    output var logic [8-1:0]  uo_out    ,
+    output var logic [8-1:0]  uio_out   ,
+    output var logic [8-1:0]  uio_oe    ,
     output var logic [32-1:0] rf_w_data ,
     output var logic [5-1:0]  rf_w_addr ,
     output var logic          rf_w_ena  ,
@@ -34,12 +26,18 @@ module hades_top (
     logic [4-1:0]  scan_row        ;
     logic [3-1:0]  scan_op         ;
     logic [4-1:0]  use_xor         ;
+    logic [4-1:0]  use_xor2        ;
     logic [32-1:0] dreg            ;
     logic [32-1:0] q               ;
     logic [32-1:0] a               ;
     logic [32-1:0] mask            ;
     logic [6-1:0]  d               ;
     logic          exact_hit       ;
+    logic          pair2           ;
+    logic          ra_sel          ;
+    logic [4-1:0]  ra_row          ;
+    logic          exact_hit2      ;
+    logic [32-1:0] masked_row2     ;
     logic [32-1:0] masked_row      ;
     logic [6-1:0]  min_dist        ;
     logic [4-1:0]  min_idx         ;
@@ -85,16 +83,13 @@ module hades_top (
     logic [5-1:0]  pc_next         ;
     logic          sta_en          ;
 
-    // Post-reset sweep HALT-fills program words 16-31 (data rows 0-15 are retained through reset).
     logic [4-1:0]  sw       ;
     logic          init_done;
     logic [16-1:0] lo_buf   ;
     logic [16-1:0] instr_raw;
-    // run=0: ctrl held in reset and HALT is presented. An accepted exec_req (only after init_done) restarts
-    // ctrl at PC 0; Q/A/MASK/result registers keep their values.
-    logic run    ;
-    logic go     ;
-    logic rst_n_c; always_comb rst_n_c = rst_n & run;
+    logic          run      ;
+    logic          go       ;
+    logic          rst_n_c  ; always_comb rst_n_c   = rst_n & run;
 
     always_ff @ (posedge clk, negedge rst_n) begin
         if (!rst_n) begin
@@ -123,14 +118,12 @@ module hades_top (
         end
     end
 
-    // Program load: even slot -> {HALT, data} and buffer the low half; odd slot -> {data, buffered low}.
     always_ff @ (posedge clk) begin
         if (pm_wr_en & ~pm_wr_addr[0]) begin
             lo_buf <= pm_wr_data;
         end
     end
 
-    // Single write port; priority: post-reset sweep > program load > STA.
     always_comb begin
         if (~init_done) begin
             rf_w_ena  = 1'b1;
@@ -151,8 +144,13 @@ module hades_top (
         end
     end
 
-    // Fetch: RF read-A samples the NEXT pc; pc[0] picks the instruction half (no fetch bubble).
-    always_comb rf_ra_addr = {1'b1, pc_next[4:1]};
+    always_comb begin
+        if (ra_sel) begin
+            rf_ra_addr = {1'b0, ra_row};
+        end else begin
+            rf_ra_addr = {1'b1, pc_next[4:1]};
+        end
+    end
     always_comb rf_rb_addr = {1'b0, sram_addr};
     always_comb begin
         if (pc[0]) begin
@@ -161,8 +159,6 @@ module hades_top (
             instr_raw = rf_ra_data[15:0];
         end
     end
-    // Until execution is requested (and during the post-reset sweep) present the HALT opcode: the fetched word may be
-    // undefined, and the idle ctrl (held in reset, FSM=fetch) must not decode/act on program slot 0.
     always_comb begin
         if (run) begin
             instr = instr_raw;
@@ -208,8 +204,13 @@ module hades_top (
         .rst_init         (rst_init        ),
         .upd_en           (upd_en          ),
         .scan_row         (scan_row        ),
+        .pair2            (pair2           ),
+        .ra_sel           (ra_sel          ),
+        .ra_row           (ra_row          ),
+        .match            (match           ),
         .scan_op          (scan_op         ),
         .use_xor_o        (use_xor         ),
+        .use_xor2_o       (use_xor2        ),
         .sram_addr        (sram_addr       ),
         .sram_csb         (sram_csb        ),
         .sram_web         (sram_web        ),
@@ -276,7 +277,6 @@ module hades_top (
         end
     end
 
-    // MASK is written per byte lane (WAITBYTE lane k, or LDM/CLRMASK on all lanes).
     logic [4-1:0] m_hit;
     always_comb begin
         for (int k = 0; k < 4; k++) begin
@@ -318,6 +318,17 @@ module hades_top (
         .masked_row (masked_row)
     );
 
+    always_comb begin
+        for (int k = 0; k < 4; k++) begin
+            if (use_xor2[k]) begin
+                masked_row2[8 * k+:8] = (rf_ra_data[8 * k+:8] ^ q[8 * k+:8]) & mask[8 * k+:8];
+            end else begin
+                masked_row2[8 * k+:8] = rf_ra_data[8 * k+:8] & mask[8 * k+:8];
+            end
+        end
+    end
+    always_comb exact_hit2 = ~|masked_row2;
+
     result_regs u_result_regs (
         .clk           (clk          ),
         .rst_n         (rst_n        ),
@@ -327,6 +338,9 @@ module hades_top (
         .d             (d            ),
         .exact_hit     (exact_hit    ),
         .masked_row    (masked_row   ),
+        .pair2         (pair2        ),
+        .exact_hit2    (exact_hit2   ),
+        .masked_row2   (masked_row2  ),
         .row           (scan_row     ),
         .a_in          (a            ),
         .min_dist      (min_dist     ),
@@ -379,4 +393,3 @@ module hades_top (
     always_comb uio_out = {5'b0, halted, busy, ready_r};
     always_comb uio_oe  = 8'b0000_0111;
 endmodule
-//# sourceMappingURL=hades_top.sv.map

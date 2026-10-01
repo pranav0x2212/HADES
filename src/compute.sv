@@ -1,5 +1,3 @@
-// Popcount tree is generated and timing-critical: do not hand-edit or re-associate.
-// Synthesis boundary: SYNTH_KEEP_HIERARCHY_MODULES in src/config.json.
 module compute (
     input  var logic [32-1:0] row_data  ,
     input  var logic [32-1:0] q         ,
@@ -98,4 +96,3 @@ module compute (
     logic c37; always_comb c37 = c36 & c35;
     always_comb d   = {s37, s36, s34, s32, s29, s25};
 endmodule
-//# sourceMappingURL=compute.sv.map

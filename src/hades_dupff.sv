@@ -1,4 +1,3 @@
-// keep_hierarchy stops synthesis merging the four use_xor copies back into one high-fanout flop.
 (* keep_hierarchy *)
 module hades_dupff (
     input  var logic clk  ,
@@ -15,4 +14,3 @@ module hades_dupff (
         end
     end
 endmodule
-//# sourceMappingURL=hades_dupff.sv.map

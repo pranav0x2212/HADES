@@ -1,4 +1,3 @@
-// Q and A have no reset; MASK resets to all ones.
 module regs (
     input  var logic          clk     ,
     input  var logic          rst_n   ,
@@ -41,4 +40,3 @@ module regs (
     always_comb a    = a_r;
     always_comb mask = mask_r;
 endmodule
-//# sourceMappingURL=regs.sv.map

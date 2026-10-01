@@ -1,5 +1,3 @@
-// scan_op: 0 = HAMMING 1 = HAMMING2 2 = THRESHOLD 3 = EXACT 4 = R_OR 5 = R_AND 6 = R_POP 7 = R_MAXPOP
-// Late predicates (lt, lt2, gt, thresh_ok, exact_hit) gate the enables last, for timing.
 module result_regs (
     input  var logic          clk          ,
     input  var logic          rst_n        ,
@@ -9,6 +7,9 @@ module result_regs (
     input  var logic [6-1:0]  d            ,
     input  var logic          exact_hit    ,
     input  var logic [32-1:0] masked_row   ,
+    input  var logic          pair2        ,
+    input  var logic          exact_hit2   ,
+    input  var logic [32-1:0] masked_row2  ,
     input  var logic [4-1:0]  row          ,
     input  var logic [32-1:0] a_in         ,
     output var logic [6-1:0]  min_dist     ,
@@ -50,8 +51,22 @@ module result_regs (
     always_comb op7 = (scan_op == 3'd7);
     always_comb go  = upd_en & ~rst_init;
 
-    logic [16-1:0] match_bit;
-    always_comb match_bit = 16'd1 << row;
+    logic [16-1:0] match_bit ;
+    always_comb match_bit  = 16'd1 << row;
+    logic [16-1:0] match_bit2;
+    always_comb match_bit2 = 16'd1 << (row + 4'd1);
+
+    logic [32-1:0] m2_or ;
+    logic [32-1:0] m2_and;
+    always_comb begin
+        if (pair2) begin
+            m2_or  = masked_row2;
+            m2_and = masked_row2;
+        end else begin
+            m2_or  = 32'd0;
+            m2_and = 32'hFFFF_FFFF;
+        end
+    end
 
     logic lt       ;
     logic lt2      ;
@@ -62,7 +77,6 @@ module result_regs (
     always_comb gt        = d > min_dist_r;
     always_comb thresh_ok = (|a_in[7:6]) | (a_in[5:0] >= d);
 
-    // REDUCE_POP add is a 6-bit late add plus a precomputed (A[31:6] + 1) selected by the carry.
     logic [7-1:0]  lo_sum ;
     logic [26-1:0] hi_inc ;
     logic [26-1:0] pop_hi ;
@@ -95,10 +109,10 @@ module result_regs (
         end else if (upd_en) begin
             if (op4) begin
                 a_wr2_en  = 1'b1;
-                a_wr2_dat = a_in | masked_row;
+                a_wr2_dat = a_in | masked_row | m2_or;
             end else if (op5) begin
                 a_wr2_en  = 1'b1;
-                a_wr2_dat = a_in & masked_row;
+                a_wr2_dat = a_in & masked_row & m2_and;
             end else if (op6) begin
                 a_wr2_en  = 1'b1;
                 a_wr2_dat = pop_sum;
@@ -119,16 +133,36 @@ module result_regs (
     always_comb init_mc     = rst_init & (op2 | op3);
     always_comb init_th     = rst_init & op2;
 
-    logic min_take   ;
-    logic m2_from_min;
-    logic m2_from_d  ;
-    logic mhit       ;
-    logic cnt_inc    ;
+    logic          min_take   ;
+    logic          m2_from_min;
+    logic          m2_from_d  ;
+    logic          mhit       ;
+    logic          mhit2      ;
+    logic [16-1:0] match_set  ;
+    logic [6-1:0]  cnt_sum    ;
+    logic [5-1:0]  cnt_next   ;
     always_comb min_take    = go & (((op0 | op1 | op2) & lt) | (op7 & gt));
     always_comb m2_from_min = go & op1 & lt;
     always_comb m2_from_d   = go & op1 & ~lt & lt2;
     always_comb mhit        = go & ((op2 & thresh_ok) | (op3 & exact_hit));
-    always_comb cnt_inc     = mhit & (count_r != 5'd31);
+    always_comb mhit2       = go & pair2 & op3 & exact_hit2;
+    always_comb begin
+        match_set = 16'd0;
+        if (mhit) begin
+            match_set = match_bit;
+        end
+        if (mhit2) begin
+            match_set = match_set | match_bit2;
+        end
+    end
+    always_comb cnt_sum = {1'b0, count_r} + {5'd0, mhit} + {5'd0, mhit2};
+    always_comb begin
+        if (cnt_sum[5]) begin
+            cnt_next = 5'd31;
+        end else begin
+            cnt_next = cnt_sum[4:0];
+        end
+    end
 
     always_ff @ (posedge clk, negedge rst_n) begin
         if (!rst_n) begin
@@ -175,11 +209,9 @@ module result_regs (
             if (init_mc) begin
                 match_r <= 16'd0;
                 count_r <= 5'd0;
-            end else if (mhit) begin
-                match_r <= match_r | match_bit;
-                if (cnt_inc) begin
-                    count_r <= count_r + 5'd1;
-                end
+            end else if (mhit | mhit2) begin
+                match_r <= match_r | match_set;
+                count_r <= cnt_next;
             end
         end
     end
@@ -193,4 +225,3 @@ module result_regs (
     always_comb match         = match_r;
     always_comb count_out     = count_r;
 endmodule
-//# sourceMappingURL=result_regs.sv.map
