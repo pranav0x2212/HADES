@@ -1,5 +1,3 @@
-// scan_op: 0 = HAMMING 1 = HAMMING2 2 = THRESHOLD 3 = EXACT 4 = R_OR 5 = R_AND 6 = R_POP 7 = R_MAXPOP
-// Late predicates (lt, lt2, gt, thresh_ok, exact_hit) gate the enables last, for timing.
 module result_regs (
     clk          : input  'p clock          ,
     rst_n        : input  'p reset_async_low,
@@ -9,6 +7,9 @@ module result_regs (
     d            : input  'p logic<6>       ,
     exact_hit    : input  'p logic          ,
     masked_row   : input  'p logic<32>      ,
+    pair2        : input  'p logic          ,
+    exact_hit2   : input  'p logic          ,
+    masked_row2  : input  'p logic<32>      ,
     row          : input  'p logic<4>       ,
     a_in         : input  'p logic<32>      ,
     min_dist     : output 'p logic<6>       ,
@@ -52,6 +53,15 @@ module result_regs (
 
     var match_bit: 'p logic<16>;
     assign match_bit = 16'd1 << row;
+    var match_bit2: 'p logic<16>;
+    assign match_bit2 = 16'd1 << (row + 4'd1);
+
+    var m2_or : 'p logic<32>;
+    var m2_and: 'p logic<32>;
+    always_comb {
+        if pair2 { m2_or = masked_row2; m2_and = masked_row2; }
+        else     { m2_or = 32'd0;       m2_and = 32'hFFFF_FFFF; }
+    }
 
     var lt       : 'p logic;
     var lt2      : 'p logic;
@@ -62,7 +72,6 @@ module result_regs (
     assign gt        = d >: min_dist_r;
     assign thresh_ok = (|a_in[7:6]) | (a_in[5:0] >= d);
 
-    // REDUCE_POP add is a 6-bit late add plus a precomputed (A[31:6] + 1) selected by the carry.
     var lo_sum : 'p logic<7>;
     var hi_inc : 'p logic<26>;
     var pop_hi : 'p logic<26>;
@@ -91,10 +100,10 @@ module result_regs (
         } else if upd_en {
             if op4 {
                 a_wr2_en  = 1'b1;
-                a_wr2_dat = a_in | masked_row;
+                a_wr2_dat = a_in | masked_row | m2_or;
             } else if op5 {
                 a_wr2_en  = 1'b1;
-                a_wr2_dat = a_in & masked_row;
+                a_wr2_dat = a_in & masked_row & m2_and;
             } else if op6 {
                 a_wr2_en  = 1'b1;
                 a_wr2_dat = pop_sum;
@@ -119,12 +128,25 @@ module result_regs (
     var m2_from_min: 'p logic;
     var m2_from_d  : 'p logic;
     var mhit       : 'p logic;
-    var cnt_inc    : 'p logic;
+    var mhit2      : 'p logic;
+    var match_set  : 'p logic<16>;
+    var cnt_sum    : 'p logic<6>;
+    var cnt_next   : 'p logic<5>;
     assign min_take    = go & (((op0 | op1 | op2) & lt) | (op7 & gt));
     assign m2_from_min = go & op1 & lt;
     assign m2_from_d   = go & op1 & ~lt & lt2;
     assign mhit        = go & ((op2 & thresh_ok) | (op3 & exact_hit));
-    assign cnt_inc     = mhit & (count_r != 5'd31);
+    assign mhit2       = go & pair2 & op3 & exact_hit2;
+    always_comb {
+        match_set = 16'd0;
+        if mhit  { match_set = match_bit; }
+        if mhit2 { match_set = match_set | match_bit2; }
+    }
+    assign cnt_sum = {1'b0, count_r} + {5'd0, mhit} + {5'd0, mhit2};
+    always_comb {
+        if cnt_sum[5] { cnt_next = 5'd31; }
+        else          { cnt_next = cnt_sum[4:0]; }
+    }
 
     always_ff (clk, rst_n) {
         if_reset {
@@ -167,9 +189,9 @@ module result_regs (
             if init_mc {
                 match_r = 16'd0;
                 count_r = 5'd0;
-            } else if mhit {
-                match_r = match_r | match_bit;
-                if cnt_inc { count_r = count_r + 5'd1; }
+            } else if mhit | mhit2 {
+                match_r = match_r | match_set;
+                count_r = cnt_next;
             }
         }
     }

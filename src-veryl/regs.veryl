@@ -1,4 +1,3 @@
-// Q and A have no reset; MASK resets to all ones.
 module regs (
     clk      : input  'p clock          ,
     rst_n    : input  'p reset_async_low,

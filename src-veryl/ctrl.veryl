@@ -1,6 +1,3 @@
-// fsm: 0=FETCH 1=SCAN 2=WAIT 3=HALT 4=LD
-// LDQ/LDA/LDM take two cycles: the fetch cycle issues the synchronous RF read of row fA and holds the PC; the LD cycle
-// (instr still shows the LDx word) writes Q/A/MASK from the read data and advances the PC.
 module ctrl (
     clk      : input  'p clock          ,
     clk_n    : input  'p clock_negedge  ,
@@ -14,7 +11,11 @@ module ctrl (
     rst_init : output 'p logic          ,
     upd_en   : output 'p logic          ,
     scan_row : output 'p logic<4>       ,
+    pair2    : output 'p logic          ,
+    ra_sel   : output 'p logic          ,
+    ra_row   : output 'p logic<4>       ,
 
+    match    : input  'p logic<16>      ,
     sram_addr: output 'p logic<4>       ,
     sram_csb : output 'p logic          ,
     sram_web : output 'p logic          ,
@@ -32,13 +33,14 @@ module ctrl (
 
     scan_op  : output 'p logic<3>       ,
     use_xor_o: output 'p logic<4>       ,
+    use_xor2_o: output 'p logic<4>      ,
     emit_src : output 'p logic<4>       ,
     emit_en  : output 'p logic          ,
 
     strobe   : input  'p logic          ,
     wb_en    : output 'p logic          ,
-    wb_dst   : output 'p logic<2>       , // WAITBYTE destination: 0=Q 1=A 2=MASK
-    wb_pos   : output 'p logic<2>       , // WAITBYTE byte lane: 0=B0 1=B1 2=B2 3=B3
+    wb_dst   : output 'p logic<2>       ,
+    wb_pos   : output 'p logic<2>       ,
 
     br_threshold_hit: input  'p logic  ,
     br_min_valid    : input  'p logic  ,
@@ -53,6 +55,10 @@ module ctrl (
     var pc_r      : 'p logic<5>;
     var scan_row_r: 'p logic<4>;
     var scan_end_r: 'p logic<4>;
+    var dual_r    : 'p logic;
+    var scan_op_r : 'p logic<3>;
+    var sel_m_r   : 'p logic;
+    var sel_r     : 'p logic<16>;
 
     var opc: 'p logic<4>;
     var fA : 'p logic<4>;
@@ -75,6 +81,9 @@ module ctrl (
     assign in_ld    =   fsm[2] & ~fsm[1] & ~fsm[0];
 
     var is_scan    : 'p logic;
+    var is_scanm   : 'p logic;
+    var scan_start : 'p logic;
+    var dual_issue : 'p logic;
     var ld_issue   : 'p logic;
     var ld_q       : 'p logic;
     var ld_a       : 'p logic;
@@ -85,7 +94,9 @@ module ctrl (
     var is_branch  : 'p logic;
     var is_halt    : 'p logic;
     var is_clrmsk  : 'p logic;
-    assign is_scan     = in_fetch & (opc == 4'd4);
+    assign is_scan     = in_fetch & ((opc == 4'd4) | (opc == 4'd10) | (opc == 4'd11));
+    assign is_scanm    = in_fetch & (opc == 4'd11);
+    assign dual_issue  = in_fetch & (opc == 4'd10) & ((fC[2:0] == 3'd3) | (fC[2:0] == 3'd4) | (fC[2:0] == 3'd5));
     assign ld_issue    = in_fetch & ((opc == 4'd0) | (opc == 4'd1) | (opc == 4'd2));
     assign ld_q        = in_ld & (opc == 4'd0);
     assign ld_a        = in_ld & (opc == 4'd1);
@@ -105,14 +116,47 @@ module ctrl (
         else               { scan_end_clamp = scan_end_raw[3:0]; }
     }
 
+    var ffs_in  : 'p logic<16>;
+    var ffs_pfx : 'p logic<16>;
+    var ffs_low : 'p logic<16>;
+    var ffs_any : 'p logic;
+    var sel_row : 'p logic<4>;
+    var sel_use : 'p logic;
+    always_comb {
+        if in_fetch { ffs_in = match; }
+        else        { ffs_in = sel_r; }
+    }
+    always_comb {
+        ffs_pfx[0] = 1'b0;
+        for i in 1..16 {
+            ffs_pfx[i] = ffs_pfx[i - 1] | ffs_in[i - 1];
+        }
+    }
+    assign ffs_low = ffs_in & ~ffs_pfx;
+    assign ffs_any = ffs_pfx[15] | ffs_in[15];
+    assign sel_row = {|(ffs_low & 16'hFF00), |(ffs_low & 16'hF0F0), |(ffs_low & 16'hCCCC), |(ffs_low & 16'hAAAA)};
+    assign sel_use = is_scanm | (in_scan & sel_m_r);
+    assign scan_start = is_scan & (~is_scanm | ffs_any);
+
     var scan_last: 'p logic;
-    assign scan_last = (scan_row_r == scan_end_r);
+    always_comb {
+        if sel_m_r { scan_last = ~ffs_any; }
+        else       { scan_last = (scan_row_r == scan_end_r) | (dual_r & (scan_row_r + 4'd1 == scan_end_r)); }
+    }
+    assign pair2     = in_scan & dual_r & (scan_row_r != scan_end_r);
+    assign ra_sel    = dual_issue | (in_scan & dual_r & ~scan_last);
+    always_comb {
+        if dual_issue { ra_row = fA + 4'd1; }
+        else          { ra_row = scan_row_r + 4'd3; }
+    }
 
     var sram_rd_en : 'p logic;
     var sram_addr_v: 'p logic<4>;
-    assign sram_rd_en = is_scan | ld_issue | (in_scan & ~scan_last);
+    assign sram_rd_en = scan_start | ld_issue | (in_scan & ~scan_last);
     always_comb {
-        if is_scan | ld_issue  { sram_addr_v = fA; }
+        if sel_use             { sram_addr_v = sel_row; }
+        else if is_scan | ld_issue { sram_addr_v = fA; }
+        else if dual_r         { sram_addr_v = scan_row_r + 4'd2; }
         else                   { sram_addr_v = scan_row_r + 4'd1; }
     }
     always_comb {
@@ -126,8 +170,10 @@ module ctrl (
     assign dreg = sram_dout;
 
     assign pc       = pc_r;
-    assign scan_op  = fC[2:0];
-    // use_xor is captured at SCAN issue; four hades_dupff copies, one per compute byte lane.
+    always_comb {
+        if in_fetch { scan_op = fC[2:0]; }
+        else        { scan_op = scan_op_r; }
+    }
     for i in 0..4 :g_ux {
         inst u_ux: hades_dupff (
             clk                    ,
@@ -135,6 +181,15 @@ module ctrl (
             en   : is_scan         ,
             d    : ~fC[2]          ,
             q    : use_xor_o[i]    ,
+        );
+    }
+    for i in 0..4 :g_ux2 {
+        inst u_ux2: hades_dupff (
+            clk                     ,
+            rst_n                   ,
+            en   : is_scan          ,
+            d    : ~fC[2]           ,
+            q    : use_xor2_o[i]    ,
         );
     }
     assign sta_en   = is_sta;
@@ -160,7 +215,6 @@ module ctrl (
         else         { m_wr_dat = dreg; }
     }
 
-    // BRANCH target = (PC+1 + {fB,fC}) mod 32
     var off8        : 'p logic<8>;
     var b_target    : 'p logic<5>;
     var branch_taken: 'p logic;
@@ -186,7 +240,7 @@ module ctrl (
         if in_fetch {
             if is_halt {
                 pc_nx = pc_r;
-            } else if is_scan | ld_issue {
+            } else if scan_start | ld_issue {
                 pc_nx = pc_r;
             } else if is_waitbyte {
                 if strobe { pc_nx = pc_r + 5'd1; }
@@ -212,14 +266,23 @@ module ctrl (
             pc_r       = 5'd0;
             scan_row_r = 4'd0;
             scan_end_r = 4'd0;
+            dual_r     = 1'b0;
+            scan_op_r  = 3'd0;
+            sel_m_r    = 1'b0;
+            sel_r      = 16'd0;
         } else {
+            sel_r = ffs_in & ffs_pfx;
             pc_r = pc_nx;
             if in_fetch {
                 if is_halt {
                     fsm = 3'd3;
-                } else if is_scan {
-                    scan_row_r = fA;
+                } else if scan_start {
+                    if is_scanm { scan_row_r = sel_row; }
+                    else        { scan_row_r = fA; }
                     scan_end_r = scan_end_clamp;
+                    dual_r     = dual_issue;
+                    sel_m_r    = is_scanm;
+                    scan_op_r  = fC[2:0];
                     fsm        = 3'd1;
                 } else if ld_issue {
                     fsm = 3'd4;
@@ -238,7 +301,9 @@ module ctrl (
                 if scan_last {
                     fsm  = 3'd0;
                 } else {
-                    scan_row_r = scan_row_r + 4'd1;
+                    if sel_m_r      { scan_row_r = sel_row; }
+                    else if dual_r  { scan_row_r = scan_row_r + 4'd2; }
+                    else            { scan_row_r = scan_row_r + 4'd1; }
                 }
             } else if in_wait {
                 if strobe {

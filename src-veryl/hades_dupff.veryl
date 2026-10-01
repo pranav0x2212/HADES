@@ -1,4 +1,3 @@
-// keep_hierarchy stops synthesis merging the four use_xor copies back into one high-fanout flop.
 #[sv("keep_hierarchy")]
 module hades_dupff (
     clk  : input  'p clock          ,
