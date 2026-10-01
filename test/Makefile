@@ -40,6 +40,6 @@ COMPILE_ARGS    += -I$(SRC_DIR)
 VERILOG_SOURCES += $(PWD)/tb.v
 TOPLEVEL         = tb
 
-COCOTB_TEST_MODULES = test
+COCOTB_TEST_MODULES = test_host,test_isa,test_scan,test_scanp,test_scansel,test_golden
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
