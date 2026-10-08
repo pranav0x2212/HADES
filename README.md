@@ -7,37 +7,23 @@ The data rows sit in an on-chip register file and the compute logic next to it s
 16-bit-instruction program (32 slots) and up to 16 rows of 32 bits. The engine then computes Hamming distance (top-2, threshold bitmap, exact match)
 and OR/AND/popcount reductions over the rows and streams the results back over an 8-bit port.
 
-See [docs/info.md](docs/info.md) for how to use it.
-
-## Architecture
-- 16 data rows of 32 bits and the 32-instruction program share one register-file macro (`rf_top`).
-- Three working registers (Q, A, MASK) and a small set of result registers. `LDQ`/`LDA`/`LDM row` load them from a data row on-chip (2 cycles each), so a query, threshold or mask can come from stored data or a previous result (`STA` then `LDx`) without the host resending it.
-- `SCAN` runs a masked XOR and popcount over a range of rows. `SCANP` reads two rows per cycle, and `SCANSEL` scans only the rows selected by `MATCH`.
-- Distances and popcounts are 6 bits (32 is representable), with identity `0x3F`.
-- Rows are written by a program (4 `RECV` + `STA row`), and results are streamed out with `SEND`.
+See [docs/info.md](docs/info.md) for the architecture, pins, instruction set and how to use the chip.
 
 ## Layout
 | Path | Contents |
 |---|---|
-| `src-veryl/` | Veryl RTL sources |
+| `src-veryl/` | Veryl RTL sources (run `veryl build` after editing) |
 | `src/` | generated SystemVerilog, wrapper `tt_um_hades.v` and the `rf_top` macro (committed, CI does not run Veryl) |
 | `test/` | cocotb tests (RTL and gate level) |
-| `sim/` | standalone Icarus testbench |
-| `tools/` | assembler (`hades_asm.py`), instruction-level simulator (`hades_sim.py`) and its tests |
-| `eval/` | evaluation scripts and results (see `eval/README.md`) |
-| `docs/` | usage, ISA, evaluation and paper sources |
-
-## Build
-Run `veryl build` after editing `src-veryl/`.
+| `docs/` | documentation |
+| `info.yaml` | Tiny Tapeout project configuration |
 
 ## Tests
 Needs Icarus Verilog (`iverilog`) and `pip install -r test/requirements.txt`.
 
 ```sh
-cd test && make sim                                   # cocotb, RTL
-cd test && make sim COCOTB_TEST_MODULES=test_scansel  # one module
-cd test && make -B GATES=yes                          # gate level
-python3 tools/test_hades.py   # assembler and simulator tests
+cd test && make sim           # RTL
+cd test && make -B GATES=yes  # gate level
 ```
 
 ## License
