@@ -9,6 +9,10 @@ and OR/AND/popcount reductions over the rows and streams the results back over a
 
 See [docs/info.md](docs/info.md) for the architecture, pins, instruction set and how to use the chip.
 
+![HADES GDSII render](docs/hades_gds.png)
+
+> HADES GDSII render
+
 ## Layout
 | Path | Contents |
 |---|---|
