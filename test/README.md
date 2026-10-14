@@ -1,4 +1,4 @@
-# HADES Rev2 — Tiny Tapeout cocotb tests
+# HADES — Tiny Tapeout cocotb tests
 
 `tb.v` instantiates the wrapper `tt_um_hades`; the test modules drive only the chip pins (reset, loader on `uio[4]`, EXECUTE on `uio[5]`, RECV data with
 STROBE `uio[3]`, SEND bytes on `uo_out`), so the same tests run at RTL and at gate level.
